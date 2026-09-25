@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parseMarksHtml } from './flex/parser.js';
 import { normalizeCookieInput, verifyAuthenticatedMarksResponse } from './flex/auth.js';
+import { buildMarksEmail, buildTestEmail, loadEmailConfig, sendEmail } from './email.js';
 
 const COOKIE_INPUT = process.env.FLEX_COOKIE || process.env.FLEX_SESSION_ID;
 const SEMESTER_ID = process.env.FLEX_SEMESTER_ID || '20263';
@@ -10,9 +11,18 @@ const POLL_MS = Number(process.env.FLEX_POLL_MS || 300000);
 const SNAPSHOT_FILE = process.env.FLEX_SNAPSHOT_FILE || './data/marks-snapshot.json';
 const RUN_ONCE = process.env.FLEX_RUN_ONCE === '1';
 const SELF_TEST = process.env.FLEX_SELF_TEST === '1';
+const EMAIL_TEST = process.env.FLEX_EMAIL_TEST === '1';
+
+let EMAIL_CONFIG = null;
+try {
+  EMAIL_CONFIG = loadEmailConfig();
+} catch (error) {
+  console.error(`EMAIL CONFIG ERROR: ${error.message}`);
+  process.exit(1);
+}
 
 let COOKIE_HEADER = null;
-if (!SELF_TEST) {
+if (!SELF_TEST && !EMAIL_TEST) {
   try {
     COOKIE_HEADER = normalizeCookieInput(COOKIE_INPUT);
   } catch (error) {
@@ -141,7 +151,34 @@ async function runSelfTest() {
   }
   console.log(`[${stamp()}] SELF-TEST PASS: diff engine detected a controlled mark change without modifying the saved snapshot.`);
   printChange(changes[0]);
-  console.log('Email test: NOT RUN — this build has no email-sending module yet.');
+}
+
+async function runEmailTest() {
+  if (!EMAIL_CONFIG) {
+    throw new Error('Email test requested, but email is not configured. Set FLEX_SMTP_USER, FLEX_SMTP_PASS, and FLEX_EMAIL_TO.');
+  }
+  const result = await sendEmail(EMAIL_CONFIG, buildTestEmail());
+  console.log(
+    `[${stamp()}] EMAIL TEST PASS | host=${EMAIL_CONFIG.host}:${EMAIL_CONFIG.port} | ` +
+    `recipients=${result.recipients}`
+  );
+}
+
+async function notifyChanges(changes) {
+  if (!EMAIL_CONFIG) {
+    console.log(`[${stamp()}] EMAIL DISABLED | mark change remains terminal-only.`);
+    return true;
+  }
+
+  try {
+    const result = await sendEmail(EMAIL_CONFIG, buildMarksEmail(changes));
+    console.log(`[${stamp()}] EMAIL SENT | recipients=${result.recipients}`);
+    return true;
+  } catch (error) {
+    console.error(`[${stamp()}] NOTIFICATION FAILED: ${error.message}`);
+    console.error(`[${stamp()}] Snapshot was NOT advanced; the same mark change will be retried on the next poll.`);
+    return false;
+  }
 }
 
 async function poll() {
@@ -198,12 +235,15 @@ async function poll() {
     const changes = diff(previous, current);
     if (changes.length === 0) {
       console.log(`[${stamp()}] WATCHED | session still authenticated | no mark changes.`);
-    } else {
-      console.log(`\n[${stamp()}] ${changes.length} mark change(s) detected:`);
-      for (const change of changes) printChange(change);
-      console.log('');
+      await saveSnapshot(current);
+      return;
     }
 
+    console.log(`\n[${stamp()}] ${changes.length} mark change(s) detected:`);
+    for (const change of changes) printChange(change);
+    console.log('');
+
+    if (!await notifyChanges(changes)) return;
     await saveSnapshot(current);
   } catch (error) {
     const code = error?.code ? ` ${error.code}` : '';
@@ -223,7 +263,9 @@ async function watchLoop() {
   }
 }
 
-if (SELF_TEST) {
+if (EMAIL_TEST) {
+  await runEmailTest();
+} else if (SELF_TEST) {
   await runSelfTest();
 } else {
   await watchLoop();

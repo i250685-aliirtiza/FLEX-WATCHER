@@ -1,66 +1,102 @@
-# FLEX Marks Watcher — Auth Verification Build
+# FLEX Marks Watcher
 
-This build polls the FLEX marks page and explicitly verifies on every poll that the supplied session still reaches the authenticated `StudentMarks` route.
+Polls the authenticated FAST FLEX marks page, validates the session on every poll, compares normalized marks against the last valid snapshot, and can email you when a mark is released or changed.
 
-It does **not** log in for you, solve Cloudflare challenges, or bypass FLEX authentication. It only uses a session/cookie you already obtained legitimately in your browser.
+It does **not** log in for you, solve Cloudflare challenges, or bypass FLEX authentication. It uses a session/cookie you already obtained legitimately in your browser.
 
-## What counts as `AUTH VERIFIED`
+## What `AUTH VERIFIED` means
 
 A poll prints `AUTH VERIFIED` only after all of these pass:
 
 1. FLEX returned HTTP 2xx.
-2. The final URL is exactly on `https://flexstudent.nu.edu.pk/Student/StudentMarks` (a redirect to login fails).
+2. The final URL is `https://flexstudent.nu.edu.pk/Student/StudentMarks`.
 3. The response is HTML.
 4. No login form is present.
 5. No Cloudflare/human-verification page is present.
-6. The existing strict marks parser successfully validates the semester/course/assessment DOM.
-7. The parsed semester matches the semester requested by the watcher.
+6. The strict marks parser validates the semester/course/assessment DOM.
+7. The parsed semester matches the requested semester.
 
-So a generic HTTP 200 page is **not** enough to produce `AUTH VERIFIED`.
+A generic HTTP 200 page is therefore **not** enough.
 
-## Windows — easiest way to run
+## Install and test
 
-Requirements: Node.js 20.19+ (or newer) and npm.
-
-Open PowerShell in this project folder and run once:
+Requirements: Node.js 20.19+ and npm.
 
 ```powershell
 npm ci
 npm test
 ```
 
-Then start a 60-second watcher:
+## Run without email
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\watch.ps1 -Seconds 60
 ```
 
-The script asks for your cookie with hidden input. Paste either:
+The script asks for your FLEX cookie with hidden input. Paste either the raw `ASP.NET_SessionId` value or a complete browser `Cookie` header.
 
-- only the value of `ASP.NET_SessionId`, or
-- the complete browser `Cookie` header if FLEX needs more than one cookie.
-
-The script does not write the cookie to a project file. Press `Ctrl+C` to stop.
-
-Example healthy output:
+Healthy output looks like:
 
 ```text
-[9/25/2026, 8:10:00 PM] AUTH VERIFIED | protected marks route | session=1a2b3c4d | semester=20263 | HTTP 200 | courses=9 | assessments=14 | released=14 | snapshot=...
+[9/25/2026, 8:10:00 PM] AUTH VERIFIED | protected marks route | session=1a2b3c4d | semester=20263 | HTTP 200 | courses=9 | assessments=20 | released=19 | snapshot=...
 [9/25/2026, 8:10:00 PM] WATCHED | session still authenticated | no mark changes.
-```
-
-Example expired session:
-
-```text
-AUTH/WATCH FAILED LOGIN_REQUIRED: FLEX session is no longer authenticated; request landed on the login page.
-Last valid snapshot was NOT overwritten.
 ```
 
 `session=1a2b3c4d` is only the first 8 characters of a SHA-256 fingerprint of the cookie. The cookie itself is never printed.
 
-## Manual environment-variable method
+## Email notifications
 
-If you prefer not to use `watch.ps1`:
+Email is optional. The watcher uses implicit-TLS SMTP and defaults to Gmail's `smtp.gmail.com:465`.
+
+For Gmail, use a **Google App Password**, not your normal Google password. The App Password is prompted with hidden input and is not written to the repository or snapshot.
+
+First test email delivery without touching FLEX or the saved marks snapshot:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\email-test.ps1 -SmtpUser "you@gmail.com" -EmailTo "you@gmail.com"
+```
+
+If delivery succeeds, you should see:
+
+```text
+EMAIL TEST PASS | host=smtp.gmail.com:465 | recipients=1
+```
+
+Then run the watcher with email enabled:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\watch.ps1 -Seconds 60 -Email -SmtpUser "you@gmail.com" -EmailTo "you@gmail.com"
+```
+
+When FLEX changes a student mark, the watcher prints the change and sends one email containing all changes detected in that poll.
+
+Examples:
+
+```text
+[NEW MARK] CS2001 | Quiz 2: 8/10
+[MARK CHANGED] MT1004 | Assignment 1: 7 -> 9/10
+```
+
+If email delivery fails after a mark change, the watcher **does not advance the saved snapshot**. The same change is retried on the next poll instead of being silently lost.
+
+Class average, minimum, maximum, and standard-deviation-only changes are ignored by the normalized snapshot.
+
+## Email environment variables
+
+The PowerShell scripts are convenient for local use. A cloud deployment can set these environment variables directly:
+
+```text
+FLEX_SMTP_USER=you@gmail.com
+FLEX_SMTP_PASS=your-app-password
+FLEX_EMAIL_TO=you@gmail.com
+FLEX_EMAIL_FROM=you@gmail.com      # optional; defaults to SMTP user
+FLEX_SMTP_HOST=smtp.gmail.com      # optional
+FLEX_SMTP_PORT=465                 # optional
+```
+
+Email settings are considered enabled when any email setting is present. `FLEX_SMTP_USER`, `FLEX_SMTP_PASS`, and `FLEX_EMAIL_TO` must then all be present.
+
+## Manual FLEX environment variables
 
 ```powershell
 $env:FLEX_SESSION_ID="PASTE_RAW_SESSION_ID_VALUE"
@@ -69,16 +105,9 @@ $env:FLEX_POLL_MS="60000"
 npm start
 ```
 
-For a full cookie header use `FLEX_COOKIE` instead:
+For a full cookie header use `FLEX_COOKIE` instead. `FLEX_COOKIE` takes precedence over `FLEX_SESSION_ID`.
 
-```powershell
-$env:FLEX_COOKIE="ASP.NET_SessionId=...; other_cookie=..."
-npm start
-```
-
-`FLEX_COOKIE` takes precedence over `FLEX_SESSION_ID`.
-
-## One-shot check
+## One-shot FLEX check
 
 ```powershell
 $env:FLEX_RUN_ONCE="1"
@@ -90,16 +119,20 @@ Remove-Item Env:FLEX_RUN_ONCE
 
 The first successful authenticated fetch becomes `data/marks-snapshot.json`.
 
-Later successful polls compare marks against that snapshot. Failed authentication, Cloudflare pages, parser failures, semester mismatches, and suspicious course-count or assessment-count drops do **not** overwrite the last valid snapshot.
+Later successful polls compare marks against that snapshot. Failed authentication, Cloudflare pages, parser failures, semester mismatches, suspicious course-count/assessment-count drops, and failed mark-notification emails do **not** overwrite the last safe baseline.
 
 ## Tests
 
 ```powershell
 npm test
+npm run test:auth
+npm run test:email
 ```
 
-The suite contains the original parser tests plus authentication-response tests for login redirects, 200-with-login-form responses, wrong routes/origins, non-HTML responses, and Cloudflare challenge pages.
+The test suite covers the marks parser, authentication response verification, and email configuration/message generation. The live email test is intentionally separate because it requires your SMTP credentials.
 
-## Important limitation
+## Current limitation
 
-This watcher proves that **each poll successfully accessed the authenticated protected marks page with the cookie you supplied**. It cannot prove that a browser tab itself remains logged in, because this program is making its own HTTP requests rather than controlling your browser. For our cloud notifier, this per-request authentication proof is the condition that matters.
+This watcher proves that **each poll successfully accessed the authenticated protected marks page with the cookie supplied to the process**. It does not control a browser tab. For a future cloud deployment, per-request authentication proof is the condition that matters.
+
+Automatic FLEX re-login is not implemented. If the session eventually expires, the watcher will fail closed and keep the last valid snapshot. Session-expiry alerting/recovery is a later reliability milestone.

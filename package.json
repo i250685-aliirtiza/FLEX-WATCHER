@@ -1,14 +1,15 @@
 {
   "name": "flex-marks-notifier",
-  "version": "0.2.0",
-  "description": "FLEX marks watcher with explicit per-poll authentication verification",
+  "version": "0.3.0",
+  "description": "FLEX marks watcher with per-poll auth verification and email notifications",
   "directories": {
     "test": "tests"
   },
   "scripts": {
     "test": "node --test",
     "start": "node src/notifier.js",
-    "test:auth": "node --test tests/auth.test.js"
+    "test:auth": "node --test tests/auth.test.js",
+    "test:email": "node --test tests/email.test.js"
   },
   "keywords": [],
   "author": "",
