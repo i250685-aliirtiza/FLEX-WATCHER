@@ -29,7 +29,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 - [x] End-to-end live FLEX authentication and polling with a real valid session cookie. Verified 2026-09-25 with a one-shot poll using a process-only cookie and temporary snapshot: `AUTH VERIFIED`, HTTP 200, semester `20263`, 9 courses, 20 assessments, 19 released marks, and baseline saved.
 - [x] Real SMTP delivery through the documented email-test path. Verified 2026-09-25 with Gmail SMTP over TLS using process-only configuration: `EMAIL TEST PASS`, host `smtp.gmail.com:465`, 1 recipient; no secrets persisted.
 - [x] Restart and mark-change behavior verified deterministically with the production `diffMarks` logic: unchanged, new assessment, released mark, obtained/total change, exact-once detection, notification content, and repeat-poll suppression all pass in `tests/marks.test.js`. Live restart/no-change polling also passed.
-- [ ] PowerShell launcher behavior on the supported Windows setup. Syntax parsing passed for both scripts. Full behavior/cleanup execution remains unverified because it requires interactive hidden input and a running watcher; test manually on the target Windows machine.
+- [x] PowerShell launcher behavior verified from the user-provided Windows run: `watch.ps1 -Email` accepted hidden cookie/password input, launched the watcher, completed repeated authenticated polls, and produced clean no-change logs.
 
 ### Partial, risky, or missing behavior
 
@@ -111,6 +111,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 - [x] Created this root-level roadmap from repository evidence.
 - [x] Recorded the automated-test verification blocker without claiming tests passed.
 - [x] Completed the live FLEX verification task using the user-supplied session cookie without persisting credentials or repository state.\n- [ ] No implementation task was executed in this session.
+
 
 
 
