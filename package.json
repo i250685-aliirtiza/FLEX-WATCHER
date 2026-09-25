@@ -9,7 +9,8 @@
     "test": "node --test",
     "start": "node src/notifier.js",
     "test:auth": "node --test tests/auth.test.js",
-    "test:email": "node --test tests/email.test.js"
+    "test:email": "node --test tests/email.test.js",
+    "test:session": "node --test tests/session-alert.test.js"
   },
   "keywords": [],
   "author": "",

@@ -3,7 +3,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parseMarksHtml } from './flex/parser.js';
 import { normalizeCookieInput, verifyAuthenticatedMarksResponse } from './flex/auth.js';
-import { buildMarksEmail, buildTestEmail, loadEmailConfig, sendEmail } from './email.js';
+import { buildMarksEmail, buildSessionExpiredEmail, buildTestEmail, loadEmailConfig, sendEmail } from './email.js';
+import { SessionAlertTracker } from './session-alert.js';
 
 const COOKIE_INPUT = process.env.FLEX_COOKIE || process.env.FLEX_SESSION_ID;
 const SEMESTER_ID = process.env.FLEX_SEMESTER_ID || '20263';
@@ -20,6 +21,16 @@ try {
   console.error(`EMAIL CONFIG ERROR: ${error.message}`);
   process.exit(1);
 }
+
+const SESSION_ALERT_TRACKER = new SessionAlertTracker({
+  sendAlert: EMAIL_CONFIG
+    ? async () => {
+        await sendEmail(EMAIL_CONFIG, buildSessionExpiredEmail());
+      }
+    : null,
+  log: msg => console.log(`[${stamp()}] ${msg}`),
+  logError: msg => console.error(`[${stamp()}] ${msg}`),
+});
 
 let COOKIE_HEADER = null;
 if (!SELF_TEST && !EMAIL_TEST) {
@@ -218,6 +229,8 @@ async function poll() {
       `assessments=${stats.assessments} | released=${stats.released} | snapshot=${stats.hash}`
     );
 
+    SESSION_ALERT_TRACKER.onPollSuccess();
+
     if (!previous) {
       await saveSnapshot(current);
       console.log(`[${stamp()}] Baseline saved. Watching FLEX every ${Math.round(POLL_MS / 1000)}s.`);
@@ -249,6 +262,7 @@ async function poll() {
     const code = error?.code ? ` ${error.code}` : '';
     console.error(`[${stamp()}] AUTH/WATCH FAILED${code}: ${error.message}`);
     console.error(`[${stamp()}] Last valid snapshot was NOT overwritten.`);
+    await SESSION_ALERT_TRACKER.onPollFailure(error);
   }
 }
 

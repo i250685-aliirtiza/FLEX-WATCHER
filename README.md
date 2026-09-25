@@ -127,12 +127,19 @@ Later successful polls compare marks against that snapshot. Failed authenticatio
 npm test
 npm run test:auth
 npm run test:email
+npm run test:session
 ```
 
-The test suite covers the marks parser, authentication response verification, and email configuration/message generation. The live email test is intentionally separate because it requires your SMTP credentials.
+The test suite covers the marks parser, authentication response verification, email configuration/message generation, and session-expiry alerting/latching. The live email test is intentionally separate because it requires your SMTP credentials.
+
+## Session expiry alerts
+
+When FLEX invalidates your session or redirects requests to the login page:
+- The watcher fails closed and preserves the last valid marks snapshot.
+- If email is configured, the watcher immediately sends an alert email informing you that the session has expired and a fresh cookie is needed.
+- To prevent spam, the alert is sent only once per outage.
+- When an updated, valid session cookie is provided and the watcher successfully retrieves marks again (`AUTH VERIFIED`), the alert latch is automatically reset.
 
 ## Current limitation
 
 This watcher proves that **each poll successfully accessed the authenticated protected marks page with the cookie supplied to the process**. It does not control a browser tab. For a future cloud deployment, per-request authentication proof is the condition that matters.
-
-Automatic FLEX re-login is not implemented. If the session eventually expires, the watcher will fail closed and keep the last valid snapshot. Session-expiry alerting/recovery is a later reliability milestone.

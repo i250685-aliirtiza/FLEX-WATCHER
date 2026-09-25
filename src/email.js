@@ -106,6 +106,23 @@ export function buildTestEmail(now = new Date()) {
   };
 }
 
+export function buildSessionExpiredEmail(detectedAt = new Date()) {
+  return {
+    subject: 'FLEX Watcher Alert - Session Expired',
+    text: [
+      'FLEX Marks Watcher Alert',
+      `Detected: ${detectedAt.toLocaleString()}`,
+      '',
+      'Your FLEX session is no longer authenticated.',
+      'A new session cookie is required.',
+      '',
+      'The watcher will continue polling, but marks cannot be checked until a valid session is provided.',
+      'The saved marks snapshot remains unchanged.',
+      '',
+    ].join('\n'),
+  };
+}
+
 class SmtpReader {
   constructor(socket) {
     this.buffer = '';

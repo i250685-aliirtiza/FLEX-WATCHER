@@ -44,6 +44,10 @@ export function verifyAuthenticatedMarksResponse({ responseUrl, status, contentT
     fail('Cloudflare/human verification page received instead of FLEX marks.', 'HUMAN_VERIFICATION_REQUIRED');
   }
 
+  if (status === 401 || status === 403) {
+    fail(`FLEX session is no longer authenticated (HTTP ${status}).`, 'LOGIN_REQUIRED');
+  }
+
   if (!Number.isInteger(status) || status < 200 || status >= 300) {
     fail(`FLEX returned HTTP ${status}.`, 'HTTP_ERROR');
   }
