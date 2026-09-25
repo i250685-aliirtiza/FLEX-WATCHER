@@ -6,6 +6,7 @@ import { normalizeCookieInput, verifyAuthenticatedMarksResponse } from './flex/a
 import { buildMarksEmail, buildSessionExpiredEmail, buildTestEmail, loadEmailConfig, sendEmail } from './email.js';
 import { SessionAlertTracker } from './session-alert.js';
 import { diffMarks } from './marks.js';
+import { validateSnapshot } from './snapshot.js';
 
 const COOKIE_INPUT = process.env.FLEX_COOKIE || process.env.FLEX_SESSION_ID;
 const SEMESTER_ID = process.env.FLEX_SEMESTER_ID || '20263';
@@ -53,7 +54,7 @@ const MARKS_URL = `https://flexstudent.nu.edu.pk/Student/StudentMarks?semid=${en
 
 async function loadSnapshot() {
   try {
-    return JSON.parse(await readFile(SNAPSHOT_FILE, 'utf8'));
+    return validateSnapshot(JSON.parse(await readFile(SNAPSHOT_FILE, 'utf8')));
   } catch (error) {
     if (error?.code === 'ENOENT') return null;
     throw error;

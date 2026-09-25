@@ -29,7 +29,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 - [x] End-to-end live FLEX authentication and polling with a real valid session cookie. Verified 2026-09-25 with a one-shot poll using a process-only cookie and temporary snapshot: `AUTH VERIFIED`, HTTP 200, semester `20263`, 9 courses, 20 assessments, 19 released marks, and baseline saved.
 - [x] Real SMTP delivery through the documented email-test path. Verified 2026-09-25 with Gmail SMTP over TLS using process-only configuration: `EMAIL TEST PASS`, host `smtp.gmail.com:465`, 1 recipient; no secrets persisted.
 - [x] Restart and mark-change behavior verified deterministically with the production `diffMarks` logic: unchanged, new assessment, released mark, obtained/total change, exact-once detection, notification content, and repeat-poll suppression all pass in `tests/marks.test.js`. Live restart/no-change polling also passed.
-- [ ] PowerShell launcher behavior on the supported Windows setup. Definition of Done: execute both launchers with safe test inputs and confirm cleanup and expected exit behavior.
+- [ ] PowerShell launcher behavior on the supported Windows setup. Syntax parsing passed for both scripts. Full behavior/cleanup execution remains unverified because it requires interactive hidden input and a running watcher; test manually on the target Windows machine.
 
 ### Partial, risky, or missing behavior
 
@@ -39,7 +39,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 - [x] Define graceful shutdown behavior. Added SIGINT/SIGTERM handling, documented Ctrl+C behavior, and verified syntax plus a live one-shot after the change.
 - [x] Resolve session refresh expectations. Documented restart-only cookie refresh in `README.md`; the process intentionally uses one cookie for its lifetime.
 - [x] Add configuration and state hygiene for deployment. Added and verified root `.gitignore` coverage for `data/`, `.env`, `node_modules/`, and `*.log`; runtime snapshots and local secrets are ignored.
-- [ ] Review snapshot schema/version validation and migration behavior. Definition of Done: malformed, incompatible, or wrong-semester snapshots fail safely and leave the last usable state intact.
+- [x] Review snapshot schema/version validation and migration behavior. Added `validateSnapshot` and tests for malformed, unsupported, and invalid nested state; invalid persisted state fails before comparison and preserves the safe snapshot.
 - [ ] Review duplicate and identity edge cases, including assessment removal/reappearance, total/weightage changes, and multiple categories with equivalent labels. Add focused tests for the intended semantics.
 - [x] Review network timeout and retry behavior. Added configurable `FLEX_REQUEST_TIMEOUT_MS` (default 30 seconds, minimum 1 second), wired through `AbortController`, and documented it.
 - [ ] Verify dependency and runtime reproducibility from a clean clone. Definition of Done: `npm ci` and the supported test/one-shot procedure work with the documented Node version and no undocumented manual edits.
@@ -58,7 +58,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 
 - [x] Add deterministic coverage for unchanged polls, new/released/changed marks, duplicate suppression, and notification content.
 - [ ] Add failure-preservation coverage for redirects/login pages, Cloudflare pages, malformed HTML, semester mismatch, network errors, and count-drop integrity failures.
-- [ ] Add snapshot schema/state tests.
+- [x] Add snapshot schema/state tests.
 
 ### Milestone 3 — Operational correctness
 
@@ -111,6 +111,8 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 - [x] Created this root-level roadmap from repository evidence.
 - [x] Recorded the automated-test verification blocker without claiming tests passed.
 - [x] Completed the live FLEX verification task using the user-supplied session cookie without persisting credentials or repository state.\n- [ ] No implementation task was executed in this session.
+
+
 
 
 
