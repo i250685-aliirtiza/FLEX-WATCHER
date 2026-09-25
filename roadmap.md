@@ -78,7 +78,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 ### Milestone 5 — Documentation and release readiness
 
 - [x] Synchronize `README.md` with the final behavior and verification procedures.
-- [ ] Perform the final security/reproducibility review.
+- [x] Perform the final security/reproducibility review.
 - [x] Confirm release files are tracked and the project is ready for commit and push.
 
 ## Permanent Codex rules
@@ -111,6 +111,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 - [x] Created this root-level roadmap from repository evidence.
 - [x] Recorded the automated-test verification blocker without claiming tests passed.
 - [x] Completed the live FLEX verification task using the user-supplied session cookie without persisting credentials or repository state.\n- [ ] No implementation task was executed in this session.
+
 
 
 
