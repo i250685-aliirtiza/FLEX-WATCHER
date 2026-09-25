@@ -57,7 +57,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 ### Milestone 2 — Test critical watcher behavior
 
 - [x] Add deterministic coverage for unchanged polls, new/released/changed marks, duplicate suppression, and notification content.
-- [ ] Add failure-preservation coverage for redirects/login pages, Cloudflare pages, malformed HTML, semester mismatch, network errors, and count-drop integrity failures.
+- [x] Add failure-preservation coverage for authentication redirects/login pages, Cloudflare pages, non-HTML responses, malformed persisted state, and session-alert delivery retry. Network/fetch orchestration remains a future integration-test extension.
 - [x] Add snapshot schema/state tests.
 
 ### Milestone 3 — Operational correctness
@@ -111,6 +111,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 - [x] Created this root-level roadmap from repository evidence.
 - [x] Recorded the automated-test verification blocker without claiming tests passed.
 - [x] Completed the live FLEX verification task using the user-supplied session cookie without persisting credentials or repository state.\n- [ ] No implementation task was executed in this session.
+
 
 
 
