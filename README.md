@@ -1,5 +1,7 @@
 # FLEX Marks Watcher
 
+For a practical single-user Windows runbook, see [DEPLOYMENT.md](./DEPLOYMENT.md).
+
 Polls the authenticated FAST FLEX marks page, validates the session on every poll, compares normalized marks against the last valid snapshot, and can email you when a mark is released or changed.
 
 It does **not** log in for you, solve Cloudflare challenges, or bypass FLEX authentication. It uses a session/cookie you already obtained legitimately in your browser.
