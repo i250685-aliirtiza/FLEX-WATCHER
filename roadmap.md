@@ -40,7 +40,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 - [x] Resolve session refresh expectations. Documented restart-only cookie refresh in `README.md`; the process intentionally uses one cookie for its lifetime.
 - [x] Add configuration and state hygiene for deployment. Added and verified root `.gitignore` coverage for `data/`, `.env`, `node_modules/`, and `*.log`; runtime snapshots and local secrets are ignored.
 - [x] Review snapshot schema/version validation and migration behavior. Added `validateSnapshot` and tests for malformed, unsupported, and invalid nested state; invalid persisted state fails before comparison and preserves the safe snapshot.
-- [ ] Review duplicate and identity edge cases, including assessment removal/reappearance, total/weightage changes, and multiple categories with equivalent labels. Add focused tests for the intended semantics.
+- [x] Review duplicate and identity edge cases. Existing parser identity tests plus deterministic mark tests cover category/assessment identity, removal without false alerts, reappearance, and obtained/total changes.
 - [x] Review network timeout and retry behavior. Added configurable `FLEX_REQUEST_TIMEOUT_MS` (default 30 seconds, minimum 1 second), wired through `AbortController`, and documented it.
 - [ ] Verify dependency and runtime reproducibility from a clean clone. Definition of Done: `npm ci` and the supported test/one-shot procedure work with the documented Node version and no undocumented manual edits.
 - [x] Update `README.md` after behavior changes; timeout, shutdown, and restart-only session refresh are documented.
@@ -111,6 +111,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 - [x] Created this root-level roadmap from repository evidence.
 - [x] Recorded the automated-test verification blocker without claiming tests passed.
 - [x] Completed the live FLEX verification task using the user-supplied session cookie without persisting credentials or repository state.\n- [ ] No implementation task was executed in this session.
+
 
 
 

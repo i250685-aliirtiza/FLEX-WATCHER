@@ -57,3 +57,17 @@ test('previously unreleased assessment becomes released', () => {
   assert.equal(changes[0].type, 'released');
   assert.match(buildMarksEmail(changes).text, /New: 8\/10/);
 });
+
+test('removed assessments do not create false changes, but reappearance is detected as new', () => {
+  const old = snapshot([
+    { id: 'a1', assessmentNumber: 1, obtained: 7, total: 10, weightage: 2.5 },
+    { id: 'a2', assessmentNumber: 2, obtained: 8, total: 10, weightage: 2.5 },
+  ]);
+  const removed = snapshot([{ id: 'a1', assessmentNumber: 1, obtained: 7, total: 10, weightage: 2.5 }]);
+  assert.deepEqual(diffMarks(old, removed), []);
+  const reappeared = snapshot([
+    { id: 'a1', assessmentNumber: 1, obtained: 7, total: 10, weightage: 2.5 },
+    { id: 'a2', assessmentNumber: 2, obtained: 8, total: 10, weightage: 2.5 },
+  ]);
+  assert.deepEqual(diffMarks(removed, reappeared).map(change => change.type), ['new']);
+});
