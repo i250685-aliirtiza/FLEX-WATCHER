@@ -7,6 +7,7 @@ import { buildMarksEmail, buildSessionExpiredEmail, buildTestEmail, loadEmailCon
 import { SessionAlertTracker } from './session-alert.js';
 import { diffMarks } from './marks.js';
 import { validateSnapshot } from './snapshot.js';
+import { decidePoll } from './poll-decision.js';
 
 const COOKIE_INPUT = process.env.FLEX_COOKIE || process.env.FLEX_SESSION_ID;
 const SEMESTER_ID = process.env.FLEX_SEMESTER_ID || '20263';
@@ -217,20 +218,13 @@ async function poll() {
       return;
     }
 
-    const prevStats = snapshotStats(previous);
-    if (stats.courses < prevStats.courses) {
-      throw new Error(`INTEGRITY CHECK FAILED: course count dropped ${prevStats.courses} -> ${stats.courses}; snapshot NOT overwritten.`);
-    }
-    if (stats.assessments < prevStats.assessments) {
-      throw new Error(`INTEGRITY CHECK FAILED: assessment count dropped ${prevStats.assessments} -> ${stats.assessments}; snapshot NOT overwritten.`);
-    }
-
-    const changes = diffMarks(previous, current);
-    if (changes.length === 0) {
+    const decision = decidePoll(previous, current);
+    if (decision.type === 'unchanged') {
       console.log(`[${stamp()}] WATCHED | session still authenticated | no mark changes.`);
       await saveSnapshot(current);
       return;
     }
+    const changes = decision.changes;
 
     console.log(`\n[${stamp()}] ${changes.length} mark change(s) detected:`);
     for (const change of changes) printChange(change);
