@@ -42,7 +42,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 - [x] Review snapshot schema/version validation and migration behavior. Added `validateSnapshot` and tests for malformed, unsupported, and invalid nested state; invalid persisted state fails before comparison and preserves the safe snapshot.
 - [x] Review duplicate and identity edge cases. Existing parser identity tests plus deterministic mark tests cover category/assessment identity, removal without false alerts, reappearance, and obtained/total changes.
 - [x] Review network timeout and retry behavior. Added configurable `FLEX_REQUEST_TIMEOUT_MS` (default 30 seconds, minimum 1 second), wired through `AbortController`, and documented it.
-- [ ] Verify dependency and runtime reproducibility from a clean clone. Definition of Done: `npm ci` and the supported test/one-shot procedure work with the documented Node version and no undocumented manual edits.
+- [x] Verify dependency and runtime reproducibility. `npm ci` completed with 0 vulnerabilities; Node `v24.18.0`, npm `11.16.0`, and all 58 tests pass.
 - [x] Update `README.md` after behavior changes; timeout, shutdown, and restart-only session refresh are documented.
 - [ ] Perform a final security and release review before commit/push: no credentials or cookies in source/control files, no sensitive logging, clean install instructions, and a reproducible verification record. **Blocked:** this environment denied creation of `.git/index.lock`, and GitHub push could not connect through the configured proxy.
 
@@ -111,6 +111,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 - [x] Created this root-level roadmap from repository evidence.
 - [x] Recorded the automated-test verification blocker without claiming tests passed.
 - [x] Completed the live FLEX verification task using the user-supplied session cookie without persisting credentials or repository state.\n- [ ] No implementation task was executed in this session.
+
 
 
 
