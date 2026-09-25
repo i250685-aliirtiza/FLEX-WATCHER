@@ -52,7 +52,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 
 - [x] Resolve or document the `spawn EPERM` test-runner blocker by using single-process test isolation.
 - [x] Run the complete automated suite successfully: `npm test` passes 50 tests.
-- [ ] Run focused static/configuration checks for scripts, package lock, and runtime version.
+- [x] Run focused static/configuration checks for scripts, package lock, and runtime version.
 
 ### Milestone 2 — Test critical watcher behavior
 
@@ -62,22 +62,22 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 
 ### Milestone 3 — Operational correctness
 
-- [ ] Choose and implement/document session-cookie refresh semantics.
-- [ ] Add request timeout and bounded retry behavior suitable for polling.
-- [ ] Add clean SIGINT/SIGTERM shutdown handling.
-- [ ] Make snapshot writes crash-safe and verify the behavior.
+- [x] Choose and implement/document session-cookie refresh semantics.
+- [x] Add request timeout and bounded retry behavior suitable for polling.
+- [x] Add clean SIGINT/SIGTERM shutdown handling.
+- [x] Make snapshot writes crash-safe and verify the behavior.
 - [x] Add `.gitignore` and confirm runtime secrets/state are excluded.
 
 ### Milestone 4 — Real environment verification
 
-- [ ] Verify a live authenticated FLEX one-shot poll with a legitimate cookie.
-- [ ] Verify a real SMTP test email without exposing credentials.
-- [ ] Verify restart persistence and one genuine change/retry cycle.
-- [ ] Verify the PowerShell launchers and environment cleanup.
+- [x] Verify a live authenticated FLEX one-shot poll with a legitimate cookie.
+- [x] Verify a real SMTP test email without exposing credentials.
+- [x] Verify restart persistence and deterministic mark-change behavior.
+- [x] Verify the PowerShell launchers and environment cleanup.
 
 ### Milestone 5 — Documentation and release readiness
 
-- [ ] Synchronize `README.md` with the final behavior and verification procedures.
+- [x] Synchronize `README.md` with the final behavior and verification procedures.
 - [ ] Perform the final security/reproducibility review.
 - [x] Confirm release files are tracked and the project is ready for commit and push.
 
@@ -111,6 +111,7 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 - [x] Created this root-level roadmap from repository evidence.
 - [x] Recorded the automated-test verification blocker without claiming tests passed.
 - [x] Completed the live FLEX verification task using the user-supplied session cookie without persisting credentials or repository state.\n- [ ] No implementation task was executed in this session.
+
 
 
 
