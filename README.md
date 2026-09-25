@@ -105,6 +105,9 @@ $env:FLEX_POLL_MS="60000"
 npm start
 ```
 
+Requests time out after 30 seconds by default. Set `FLEX_REQUEST_TIMEOUT_MS` to change this (minimum 1000 ms).
+Press Ctrl+C to stop the watcher; it finishes the current poll and exits without replacing the last safe snapshot.
+
 For a full cookie header use `FLEX_COOKIE` instead. `FLEX_COOKIE` takes precedence over `FLEX_SESSION_ID`.
 
 ## One-shot FLEX check
@@ -143,3 +146,5 @@ When FLEX invalidates your session or redirects requests to the login page:
 ## Current limitation
 
 This watcher proves that **each poll successfully accessed the authenticated protected marks page with the cookie supplied to the process**. It does not control a browser tab. For a future cloud deployment, per-request authentication proof is the condition that matters.
+
+The cookie is read once when the process starts. If FLEX expires it, stop the watcher and restart it with a newly copied cookie; the process does not silently switch credentials while running.

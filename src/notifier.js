@@ -1,14 +1,16 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parseMarksHtml } from './flex/parser.js';
 import { normalizeCookieInput, verifyAuthenticatedMarksResponse } from './flex/auth.js';
 import { buildMarksEmail, buildSessionExpiredEmail, buildTestEmail, loadEmailConfig, sendEmail } from './email.js';
 import { SessionAlertTracker } from './session-alert.js';
+import { diffMarks } from './marks.js';
 
 const COOKIE_INPUT = process.env.FLEX_COOKIE || process.env.FLEX_SESSION_ID;
 const SEMESTER_ID = process.env.FLEX_SEMESTER_ID || '20263';
 const POLL_MS = Number(process.env.FLEX_POLL_MS || 300000);
+const REQUEST_TIMEOUT_MS = Number(process.env.FLEX_REQUEST_TIMEOUT_MS || 30000);
 const SNAPSHOT_FILE = process.env.FLEX_SNAPSHOT_FILE || './data/marks-snapshot.json';
 const RUN_ONCE = process.env.FLEX_RUN_ONCE === '1';
 const SELF_TEST = process.env.FLEX_SELF_TEST === '1';
@@ -49,45 +51,6 @@ if (!Number.isFinite(POLL_MS) || POLL_MS < 10000) {
 
 const MARKS_URL = `https://flexstudent.nu.edu.pk/Student/StudentMarks?semid=${encodeURIComponent(SEMESTER_ID)}`;
 
-function flatten(snapshot) {
-  const out = new Map();
-  for (const course of snapshot.semester.courses) {
-    for (const category of course.categories) {
-      for (const a of category.assessments) {
-        out.set(a.id, {
-          id: a.id,
-          courseCode: course.courseCode,
-          courseName: course.name,
-          category: category.name,
-          assessmentNumber: a.assessmentNumber,
-          obtained: a.obtained,
-          total: a.total,
-          weightage: a.weightage,
-        });
-      }
-    }
-  }
-  return out;
-}
-
-function diff(oldSnapshot, newSnapshot) {
-  const before = flatten(oldSnapshot);
-  const after = flatten(newSnapshot);
-  const changes = [];
-
-  for (const [id, now] of after) {
-    const old = before.get(id);
-    if (!old) {
-      if (now.obtained !== null) changes.push({ type: 'new', now });
-      continue;
-    }
-    if (old.obtained !== now.obtained) {
-      changes.push({ type: old.obtained === null ? 'released' : 'changed', old, now });
-    }
-  }
-  return changes;
-}
-
 async function loadSnapshot() {
   try {
     return JSON.parse(await readFile(SNAPSHOT_FILE, 'utf8'));
@@ -99,7 +62,19 @@ async function loadSnapshot() {
 
 async function saveSnapshot(snapshot) {
   await mkdir(dirname(SNAPSHOT_FILE), { recursive: true });
-  await writeFile(SNAPSHOT_FILE, JSON.stringify(snapshot, null, 2));
+  const temporary = `${SNAPSHOT_FILE}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    await writeFile(temporary, JSON.stringify(snapshot, null, 2), { encoding: 'utf8' });
+    await rename(temporary, SNAPSHOT_FILE);
+  } finally {
+    try { await unlink(temporary); } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+}
+if (!Number.isFinite(REQUEST_TIMEOUT_MS) || REQUEST_TIMEOUT_MS < 1000) {
+  console.error('FLEX_REQUEST_TIMEOUT_MS must be a number >= 1000.');
+  process.exit(1);
 }
 
 function stamp() {
@@ -156,7 +131,7 @@ async function runSelfTest() {
   }
   if (!target) throw new Error('Snapshot contains no released mark to mutate for self-test.');
   target.obtained += 0.123456;
-  const changes = diff(snapshot, mutated);
+  const changes = diffMarks(snapshot, mutated);
   if (changes.length !== 1 || changes[0].type !== 'changed') {
     throw new Error(`Self-test failed: expected exactly one changed mark; got ${changes.length}.`);
   }
@@ -194,6 +169,8 @@ async function notifyChanges(changes) {
 
 async function poll() {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     const res = await fetch(MARKS_URL, {
       headers: {
         Cookie: COOKIE_HEADER,
@@ -202,7 +179,9 @@ async function poll() {
         'Accept-Language': 'en-US,en;q=0.9',
       },
       redirect: 'follow',
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
 
     const html = await res.text();
     verifyAuthenticatedMarksResponse({
@@ -245,7 +224,7 @@ async function poll() {
       throw new Error(`INTEGRITY CHECK FAILED: assessment count dropped ${prevStats.assessments} -> ${stats.assessments}; snapshot NOT overwritten.`);
     }
 
-    const changes = diff(previous, current);
+    const changes = diffMarks(previous, current);
     if (changes.length === 0) {
       console.log(`[${stamp()}] WATCHED | session still authenticated | no mark changes.`);
       await saveSnapshot(current);
@@ -271,10 +250,18 @@ async function watchLoop() {
   if (RUN_ONCE) return;
 
   // Sequential loop avoids overlapping checks when FLEX is slow.
-  while (true) {
+  let stopping = false;
+  const stop = () => { stopping = true; };
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
+  while (!stopping) {
     await new Promise(resolve => setTimeout(resolve, POLL_MS));
+    if (stopping) break;
     await poll();
   }
+  process.removeListener('SIGINT', stop);
+  process.removeListener('SIGTERM', stop);
+  console.log(`[${stamp()}] SHUTDOWN COMPLETE`);
 }
 
 if (EMAIL_TEST) {

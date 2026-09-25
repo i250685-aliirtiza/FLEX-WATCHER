@@ -6,7 +6,7 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --test --test-isolation=none",
     "start": "node src/notifier.js",
     "test:auth": "node --test tests/auth.test.js",
     "test:email": "node --test tests/email.test.js",
