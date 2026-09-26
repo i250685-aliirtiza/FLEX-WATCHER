@@ -1,8 +1,36 @@
 import { FlexAuthError } from './auth.js';
 
 // Deliberately no guessed POST: the live page uses AJAX and Turnstile.
-export async function loginToFlex() {
-  throw new FlexAuthError('Automatic login needs a verified browser login capture (including Turnstile requirements). Restart with a valid cookie; see AUTHENTICATION.md.', 'MANUAL_INTERVENTION');
+export async function loginToFlex({ browserType } = {}) {
+  const username = process.env.FLEX_USERNAME;
+  const password = process.env.FLEX_PASSWORD;
+  if (!username || !password) throw new FlexAuthError('FLEX_USERNAME and FLEX_PASSWORD are required for automatic login.', 'MANUAL_INTERVENTION');
+  let chromium;
+  try { ({ chromium } = await import('playwright')); } catch {
+    throw new FlexAuthError('Playwright is unavailable; install dependencies and retry.', 'MANUAL_INTERVENTION');
+  }
+  const browser = await (browserType || chromium).launch({ headless: true });
+  try {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.goto('https://flexstudent.nu.edu.pk/Login', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.locator('input[name="username"]').fill(username);
+    await page.locator('input[name="password"]').fill(password);
+    const challenge = page.locator('input[name="cf-turnstile-response"]');
+    await challenge.waitFor({ state: 'attached', timeout: 30000 });
+    await page.waitForFunction(() => Boolean(document.querySelector('input[name="cf-turnstile-response"]')?.value), null, { timeout: 120000 });
+    await Promise.all([
+      page.waitForResponse(response => response.url().toLowerCase().endsWith('/login/login') && response.request().method() === 'POST', { timeout: 30000 }),
+      page.locator('#m_login_signin_submit').click(),
+    ]);
+    const cookies = await context.cookies('https://flexstudent.nu.edu.pk');
+    const session = cookies.find(cookie => cookie.name === 'ASP.NET_SessionId' && cookie.value);
+    if (!session) throw new FlexAuthError('Automatic login returned no FLEX session cookie.', 'MANUAL_INTERVENTION');
+    return `ASP.NET_SessionId=${session.value}`;
+  } catch (error) {
+    if (error?.code === 'MANUAL_INTERVENTION') throw error;
+    throw new FlexAuthError('Automatic FLEX login failed or Turnstile did not complete.', 'MANUAL_INTERVENTION');
+  } finally { await browser.close(); }
 }
 
 export class SessionRecovery {

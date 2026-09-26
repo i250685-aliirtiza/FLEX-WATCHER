@@ -151,6 +151,7 @@ This watcher proves that **each poll successfully accessed the authenticated pro
 
 The cookie is read once when the process starts. If FLEX expires it, stop the watcher and restart it with a newly copied cookie; the process does not silently switch credentials while running.
 
-## Automatic session recovery (in progress)
+## Automatic session recovery (opt-in)
 
-The overnight run expired after approximately 4h12m. Cookie mode still requires manual renewal. An opt-in `FLEX_AUTO_LOGIN=1` recovery scaffold is implemented and mock-tested, but its live login adapter is deliberately blocked pending browser request evidence. Leave this variable unset for normal use. See [AUTHENTICATION.md](./AUTHENTICATION.md) for findings, safe tests and the exact redacted capture needed. No FLEX username/password settings are active yet.
+The overnight run expired after approximately 4h12m. Cookie mode still requires manual renewal. An opt-in `FLEX_AUTO_LOGIN=1` recovery scaffold is implemented and mock-tested, but its live login adapter is deliberately blocked pending browser request evidence. Leave this variable unset for normal use. See [AUTHENTICATION.md](./AUTHENTICATION.md) for findings, safe tests and the exact redacted capture needed. Set `FLEX_AUTO_LOGIN=1`, `FLEX_USERNAME`, and `FLEX_PASSWORD` to opt into browser-based recovery. Install the browser once with `npx playwright install chromium`. Credentials remain environment-only and are never logged. If Turnstile or login cannot complete, recovery fails closed and requests manual intervention.
+

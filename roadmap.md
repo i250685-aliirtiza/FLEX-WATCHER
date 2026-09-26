@@ -2,15 +2,15 @@
 
 This file is the permanent source of truth for future Codex sessions. It reflects the repository as inspected on 2026-09-25, branch `main`.
 
-## Current milestone — automatic authentication/session recovery (26 September 2026)
+## Current milestone ï¿½ automatic authentication/session recovery (26 September 2026)
 
 - [x] Review existing implementation, README, history/status and overnight log. User reports authentication from about 23:00 to 03:12:18 (~4h12m); subsequent LOGIN_REQUIRED polls preserve state and the expiry alert works. An unchanged cookie identifier does not establish server-side authentication.
-- [x] Inspect public login page and script: POST form, username/password/remember, AJAX JSON success redirect, and Cloudflare Turnstile observed. Static response exposed no named ASP.NET/CSRF hidden fields; browser-generated fields remain unknown.
+- [x] Inspect verified login contract: same-origin XHR POST `/login/Login`, form fields `username`, `password`, `cf-turnstile-response`, JSON `{url:"/",status:"done"}`, existing ASP.NET_SessionId retained, and Turnstile executes in-browser.
 - [x] Implement and mock-test bounded recovery controller, protected-page verification before cookie replacement, network/auth distinction and fail-closed adapter. Existing marks comparison remains intact. Correct request timeout lifecycle through body reading.
-- [ ] Capture the redacted successful browser login contract described in AUTHENTICATION.md. Blocker: Turnstile token requirements, browser-added fields and cookie/redirect contract are unverified.
-- [ ] Implement actual login transport, scoped cookie collection and token handling from verified evidence; environment-only credentials. No guessed credential POST is implemented.
+- [x] Capture and record the redacted successful browser login contract. Verified findings are documented in `AUTHENTICATION.md` and supplied by the user on 2026-09-26.
+- [x] Implement Playwright login transport, scoped session-cookie extraction, Turnstile wait, response wait, and fail-closed manual intervention; credentials are environment-only. Live FLEX execution remains unverified.
 - [ ] Verify live initial login and expired-session recovery, including snapshot preservation and resumed notification behavior. Mock controller success does not establish live login success.
-- [ ] Extend orchestration tests through fetch/login/email/state persistence; current component tests alone do not prove the complete recovery transaction.
+- [x] Add mocked browser/recovery coverage for cookie extraction, Turnstile timeout/manual intervention, verification failure, backoff and old-session preservation. Full live recovery remains unverified.
 
 Verification this session: `node --check src/notifier.js` and `npm test` (62 passing). No live credentials submitted and no live marks state changed. Historic checked items below retain their original evidence and do not establish automatic login readiness.
 
@@ -123,6 +123,7 @@ Verification this session: `node --check src/notifier.js` and `npm test` (62 pas
 - [x] Created this root-level roadmap from repository evidence.
 - [x] Recorded the automated-test verification blocker without claiming tests passed.
 - [x] Completed the live FLEX verification task using the user-supplied session cookie without persisting credentials or repository state.\n- [ ] No implementation task was executed in this session.
+
 
 
 

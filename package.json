@@ -17,7 +17,8 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "parse5": "8.0.1"
+    "parse5": "8.0.1",
+    "playwright": "^1.63.0"
   },
   "private": true,
   "engines": {

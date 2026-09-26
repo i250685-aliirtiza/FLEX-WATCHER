@@ -7,7 +7,7 @@ import { buildMarksEmail, buildSessionExpiredEmail, buildTestEmail, loadEmailCon
 import { SessionAlertTracker } from './session-alert.js';
 import { diffMarks } from './marks.js';
 import { validateSnapshot } from './snapshot.js';
-import { SessionRecovery } from './flex/recovery.js';
+import { SessionRecovery, loginToFlex } from './flex/recovery.js';
 import { decidePoll } from './poll-decision.js';
 
 const COOKIE_INPUT = process.env.FLEX_COOKIE || process.env.FLEX_SESSION_ID;
@@ -44,7 +44,7 @@ const SESSION_ALERT_TRACKER = new SessionAlertTracker({
 let COOKIE_HEADER = null;
 if (!SELF_TEST && !EMAIL_TEST) {
   try {
-    COOKIE_HEADER = normalizeCookieInput(COOKIE_INPUT);
+    COOKIE_HEADER = COOKIE_INPUT ? normalizeCookieInput(COOKIE_INPUT) : (process.env.FLEX_AUTO_LOGIN === '1' ? null : normalizeCookieInput(COOKIE_INPUT));
   } catch (error) {
     console.error(error.message);
     process.exit(1);
@@ -209,12 +209,18 @@ async function fetchVerifiedMarks(cookie) {
     } finally { clearTimeout(timeout); }
 }
 
-const RECOVERY = new SessionRecovery({ verify: fetchVerifiedMarks, log: console.log });
+const RECOVERY = new SessionRecovery({ login: loginToFlex, verify: fetchVerifiedMarks, log: msg => console.log(`[${stamp()}] ${msg}`) });
 
 async function poll() {
   try {
     let result;
-    try { result = await fetchVerifiedMarks(COOKIE_HEADER); }
+    try {
+      if (!COOKIE_HEADER && process.env.FLEX_AUTO_LOGIN === '1') {
+        const recovered = await RECOVERY.recover({ code: 'LOGIN_REQUIRED' });
+        COOKIE_HEADER = recovered.cookie;
+        result = recovered.result;
+      } else result = await fetchVerifiedMarks(COOKIE_HEADER);
+    }
     catch (error) {
       if (process.env.FLEX_AUTO_LOGIN !== '1') throw error;
       const recovered = await RECOVERY.recover(error);
