@@ -7,6 +7,7 @@ import { buildMarksEmail, buildSessionExpiredEmail, buildTestEmail, loadEmailCon
 import { SessionAlertTracker } from './session-alert.js';
 import { diffMarks } from './marks.js';
 import { validateSnapshot } from './snapshot.js';
+import { SessionRecovery } from './flex/recovery.js';
 import { decidePoll } from './poll-decision.js';
 
 const COOKIE_INPUT = process.env.FLEX_COOKIE || process.env.FLEX_SESSION_ID;
@@ -29,7 +30,11 @@ try {
 const SESSION_ALERT_TRACKER = new SessionAlertTracker({
   sendAlert: EMAIL_CONFIG
     ? async () => {
-        await sendEmail(EMAIL_CONFIG, buildSessionExpiredEmail());
+        const message = buildSessionExpiredEmail();
+        if (process.env.FLEX_AUTO_LOGIN === '1') {
+          message.text += '\nAutomatic recovery is unavailable or exhausted. Manual intervention required: restart with a valid cookie and consult AUTHENTICATION.md.\n';
+        }
+        await sendEmail(EMAIL_CONFIG, message);
       }
     : null,
   log: msg => console.log(`[${stamp()}] ${msg}`),
@@ -169,13 +174,13 @@ async function notifyChanges(changes) {
   }
 }
 
-async function poll() {
-  try {
+async function fetchVerifiedMarks(cookie) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
     const res = await fetch(MARKS_URL, {
       headers: {
-        Cookie: COOKIE_HEADER,
+        Cookie: cookie,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/142 Safari/537.36',
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
@@ -183,7 +188,7 @@ async function poll() {
       redirect: 'follow',
       signal: controller.signal,
     });
-    clearTimeout(timeout);
+
 
     const html = await res.text();
     verifyAuthenticatedMarksResponse({
@@ -200,13 +205,30 @@ async function poll() {
       throw new Error(`SEMESTER MISMATCH: requested ${SEMESTER_ID}, received ${current.semester.id}.`);
     }
 
+    return { current, status: res.status };
+    } finally { clearTimeout(timeout); }
+}
+
+const RECOVERY = new SessionRecovery({ verify: fetchVerifiedMarks, log: console.log });
+
+async function poll() {
+  try {
+    let result;
+    try { result = await fetchVerifiedMarks(COOKIE_HEADER); }
+    catch (error) {
+      if (process.env.FLEX_AUTO_LOGIN !== '1') throw error;
+      const recovered = await RECOVERY.recover(error);
+      COOKIE_HEADER = recovered.cookie;
+      result = recovered.result;
+    }
+    const { current, status } = result;
     const stats = snapshotStats(current);
     const previous = await loadSnapshot();
     const fp = sessionFingerprint(COOKIE_HEADER);
 
     console.log(
       `[${stamp()}] AUTH VERIFIED | protected marks route | session=${fp} | ` +
-      `semester=${current.semester.id} | HTTP ${res.status} | courses=${stats.courses} | ` +
+      `semester=${current.semester.id} | HTTP ${status} | courses=${stats.courses} | ` +
       `assessments=${stats.assessments} | released=${stats.released} | snapshot=${stats.hash}`
     );
 
@@ -236,7 +258,7 @@ async function poll() {
     const code = error?.code ? ` ${error.code}` : '';
     console.error(`[${stamp()}] AUTH/WATCH FAILED${code}: ${error.message}`);
     console.error(`[${stamp()}] Last valid snapshot was NOT overwritten.`);
-    await SESSION_ALERT_TRACKER.onPollFailure(error);
+    await SESSION_ALERT_TRACKER.onPollFailure(error?.code === 'MANUAL_INTERVENTION' ? { code: 'LOGIN_REQUIRED' } : error);
   }
 }
 

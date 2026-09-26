@@ -2,6 +2,18 @@
 
 This file is the permanent source of truth for future Codex sessions. It reflects the repository as inspected on 2026-09-25, branch `main`.
 
+## Current milestone — automatic authentication/session recovery (26 September 2026)
+
+- [x] Review existing implementation, README, history/status and overnight log. User reports authentication from about 23:00 to 03:12:18 (~4h12m); subsequent LOGIN_REQUIRED polls preserve state and the expiry alert works. An unchanged cookie identifier does not establish server-side authentication.
+- [x] Inspect public login page and script: POST form, username/password/remember, AJAX JSON success redirect, and Cloudflare Turnstile observed. Static response exposed no named ASP.NET/CSRF hidden fields; browser-generated fields remain unknown.
+- [x] Implement and mock-test bounded recovery controller, protected-page verification before cookie replacement, network/auth distinction and fail-closed adapter. Existing marks comparison remains intact. Correct request timeout lifecycle through body reading.
+- [ ] Capture the redacted successful browser login contract described in AUTHENTICATION.md. Blocker: Turnstile token requirements, browser-added fields and cookie/redirect contract are unverified.
+- [ ] Implement actual login transport, scoped cookie collection and token handling from verified evidence; environment-only credentials. No guessed credential POST is implemented.
+- [ ] Verify live initial login and expired-session recovery, including snapshot preservation and resumed notification behavior. Mock controller success does not establish live login success.
+- [ ] Extend orchestration tests through fetch/login/email/state persistence; current component tests alone do not prove the complete recovery transaction.
+
+Verification this session: `node --check src/notifier.js` and `npm test` (62 passing). No live credentials submitted and no live marks state changed. Historic checked items below retain their original evidence and do not establish automatic login readiness.
+
 ## Current implementation assessment
 
 ### Implemented and verified by repository evidence

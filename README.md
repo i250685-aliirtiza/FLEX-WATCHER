@@ -150,3 +150,7 @@ When FLEX invalidates your session or redirects requests to the login page:
 This watcher proves that **each poll successfully accessed the authenticated protected marks page with the cookie supplied to the process**. It does not control a browser tab. For a future cloud deployment, per-request authentication proof is the condition that matters.
 
 The cookie is read once when the process starts. If FLEX expires it, stop the watcher and restart it with a newly copied cookie; the process does not silently switch credentials while running.
+
+## Automatic session recovery (in progress)
+
+The overnight run expired after approximately 4h12m. Cookie mode still requires manual renewal. An opt-in `FLEX_AUTO_LOGIN=1` recovery scaffold is implemented and mock-tested, but its live login adapter is deliberately blocked pending browser request evidence. Leave this variable unset for normal use. See [AUTHENTICATION.md](./AUTHENTICATION.md) for findings, safe tests and the exact redacted capture needed. No FLEX username/password settings are active yet.
