@@ -1,0 +1,33 @@
+[Unit]
+Description=FLEX Marks Notifier
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=flex-watcher
+Group=flex-watcher
+WorkingDirectory=/opt/flex-marks-notifier
+EnvironmentFile=/etc/flex-marks-notifier.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/flex-marks-notifier/src/notifier.js
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=120
+StateDirectory=flex-marks-notifier
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -4,3 +4,11 @@ data/
 .env
 .env.*
 !.env.example
+
+# Local captures, credentials and abandoned browser experiment output
+*.har
+*.pem
+*.key
+playwright-report/
+test-results/
+.auth/

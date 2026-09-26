@@ -1,10 +1,34 @@
 # FLEX Marks Watcher
 
-For a practical single-user Windows runbook, see [DEPLOYMENT.md](./DEPLOYMENT.md).
+For Windows, see [DEPLOYMENT.md](./DEPLOYMENT.md). For Oracle Cloud Ubuntu, use the production runbook below and the committed [systemd unit](./deploy/flex-marks-notifier.service).
 
 Polls the authenticated FAST FLEX marks page, validates the session on every poll, compares normalized marks against the last valid snapshot, and can email you when a mark is released or changed.
 
 It does **not** log in for you, solve Cloudflare challenges, or bypass FLEX authentication. It uses a session/cookie you already obtained legitimately in your browser.
+
+
+## Oracle Cloud Ubuntu deployment
+
+The service uses the protected marks request as its authentication check; no separate heartbeat endpoint is polled. Defaults are a five minute poll, 30 second request timeout, and capped exponential retry after failures. Override them in the environment file with `FLEX_POLL_MS`, `FLEX_REQUEST_TIMEOUT_MS`, `FLEX_RETRY_BASE_MS`, and `FLEX_RETRY_MAX_MS`.
+
+On a fresh Ubuntu VM (Node.js 20+ is required):
+
+```bash
+sudo apt update && sudo apt install -y git curl ca-certificates
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+sudo useradd --system --home /opt/flex-marks-notifier --shell /usr/sbin/nologin flex-watcher
+sudo git clone https://github.com/i250685-aliirtiza/FLEX-WATCHER.git /opt/flex-marks-notifier
+sudo chown -R flex-watcher:flex-watcher /opt/flex-marks-notifier
+cd /opt/flex-marks-notifier && sudo -u flex-watcher npm ci --omit=dev
+sudo install -m 0600 -o root -g root .env.example /etc/flex-marks-notifier.env
+sudoedit /etc/flex-marks-notifier.env
+sudo install -m 0644 deploy/flex-marks-notifier.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now flex-marks-notifier
+```
+
+Manage it with `sudo systemctl status flex-marks-notifier`, `sudo systemctl restart flex-marks-notifier`, `sudo systemctl stop flex-marks-notifier`, and `sudo journalctl -u flex-marks-notifier -f`. To replace an expired cookie, edit only `FLEX_COOKIE` (`sudoedit /etc/flex-marks-notifier.env`), then run `sudo systemctl restart flex-marks-notifier`; the next valid poll logs `AUTH VERIFIED` and the expiry alert latch resets. Never put the cookie in Git, shell history, or issue reports.
 
 ## What `AUTH VERIFIED` means
 

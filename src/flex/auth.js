@@ -28,30 +28,21 @@ export function normalizeCookieInput(raw) {
  * The parser performs the second half of the proof by validating the marks DOM.
  */
 export function verifyAuthenticatedMarksResponse({ responseUrl, status, contentType = '', html }) {
-  if (typeof html !== 'string' || html.length === 0) {
-    fail('FLEX returned an empty response body.', 'INVALID_HTML');
+  // HTTP failures take precedence over missing/malformed server error bodies.
+  if (Number.isInteger(status) && status >= 500) {
+    throw Object.assign(new FlexAuthError(`FLEX returned HTTP ${status}.`, 'HTTP_ERROR'), { status });
   }
-
-  const lower = html.toLowerCase();
-  const challengeSignals = [
-    'cf-chl-',
-    'challenge-platform',
-    'verify you are human',
-    'checking your browser',
-    'just a moment...',
-  ];
+  const lower = typeof html === 'string' ? html.toLowerCase() : '';
+  const challengeSignals = ['cf-chl-', 'challenge-platform', 'verify you are human', 'checking your browser', 'just a moment...'];
   if (challengeSignals.some(signal => lower.includes(signal))) {
     fail('Cloudflare/human verification page received instead of FLEX marks.', 'HUMAN_VERIFICATION_REQUIRED');
   }
-
   if (status === 401 || status === 403) {
     fail(`FLEX session is no longer authenticated (HTTP ${status}).`, 'LOGIN_REQUIRED');
   }
-
   if (!Number.isInteger(status) || status < 200 || status >= 300) {
-    fail(`FLEX returned HTTP ${status}.`, 'HTTP_ERROR');
+    throw Object.assign(new FlexAuthError(`FLEX returned HTTP ${status}.`, 'HTTP_ERROR'), { status });
   }
-
   let final;
   try {
     final = new globalThis.URL(responseUrl);
@@ -70,6 +61,8 @@ export function verifyAuthenticatedMarksResponse({ responseUrl, status, contentT
     }
     fail(`Expected /Student/StudentMarks but final path is ${final.pathname}.`, 'ROUTING_FAILED');
   }
+
+  if (typeof html !== 'string' || html.length === 0) fail('FLEX returned an empty response body.', 'INVALID_HTML');
 
   if (contentType && !contentType.toLowerCase().includes('text/html')) {
     fail(`Expected HTML but received Content-Type: ${contentType}.`, 'INVALID_CONTENT_TYPE');

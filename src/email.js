@@ -217,7 +217,9 @@ async function openTls(config, timeoutMs) {
     servername: config.host,
     rejectUnauthorized: true,
   });
-  socket.setTimeout(timeoutMs, () => socket.destroy(new Error(`SMTP timeout after ${timeoutMs}ms.`)));
+  // A total deadline also bounds servers that trickle bytes without completing SMTP.
+  const deadline = setTimeout(() => socket.destroy(new Error(`SMTP timeout after ${timeoutMs}ms.`)), timeoutMs);
+  socket.once('close', () => clearTimeout(deadline));
   const reader = new SmtpReader(socket);
 
   await new Promise((resolve, reject) => {
@@ -267,7 +269,8 @@ export async function sendEmail(config, message, { timeoutMs = 15000 } = {}) {
     await expect(reader, [250], 'message delivery');
 
     writeLine(socket, 'QUIT');
-    await expect(reader, [221], 'QUIT');
+    // DATA acceptance already confirms delivery. A failed QUIT must not cause a duplicate.
+    try { await expect(reader, [221], 'QUIT'); } catch { /* message accepted */ }
     return { recipients: config.to.length };
   } finally {
     socket.destroy();

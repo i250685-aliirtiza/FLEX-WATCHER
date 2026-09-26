@@ -9,6 +9,7 @@ import { diffMarks } from './marks.js';
 import { validateSnapshot } from './snapshot.js';
 import { FlexSession } from './flex/session.js';
 import { decidePoll } from './poll-decision.js';
+import { retryDelay, classifyFailure } from './retry.js';
 
 const COOKIE_INPUT = process.env.FLEX_COOKIE || process.env.FLEX_SESSION_ID;
 const SEMESTER_ID = process.env.FLEX_SEMESTER_ID || '20263';
@@ -18,7 +19,8 @@ const SNAPSHOT_FILE = process.env.FLEX_SNAPSHOT_FILE || './data/marks-snapshot.j
 const RUN_ONCE = process.env.FLEX_RUN_ONCE === '1';
 const SELF_TEST = process.env.FLEX_SELF_TEST === '1';
 const EMAIL_TEST = process.env.FLEX_EMAIL_TEST === '1';
-const HEARTBEAT_MS = Number(process.env.FLEX_HEARTBEAT_MS || 12 * 60 * 1000);
+const RETRY_BASE_MS = Number(process.env.FLEX_RETRY_BASE_MS || POLL_MS);
+const RETRY_MAX_MS = Number(process.env.FLEX_RETRY_MAX_MS || Math.max(POLL_MS, 1800000));
 const LONG_RUN = process.env.FLEX_LONG_RUN === '1';
 const LONG_RUN_MS = Number(process.env.FLEX_LONG_RUN_HOURS || 8) * 60 * 60 * 1000;
 
@@ -57,7 +59,16 @@ if (!Number.isFinite(POLL_MS) || POLL_MS < 10000) {
   process.exit(1);
 }
 
-const MARKS_URL = `https://flexstudent.nu.edu.pk/Student/StudentMarks?semid=${encodeURIComponent(SEMESTER_ID)}`;
+for (const [name, value] of Object.entries({ FLEX_POLL_MS: POLL_MS, FLEX_REQUEST_TIMEOUT_MS: REQUEST_TIMEOUT_MS, FLEX_RETRY_BASE_MS: RETRY_BASE_MS, FLEX_RETRY_MAX_MS: RETRY_MAX_MS })) {
+  if (!Number.isSafeInteger(value) || value < (name === 'FLEX_REQUEST_TIMEOUT_MS' ? 1000 : 10000) || value > 2147483647) {
+    console.error(`${name} must be an integer within the supported timer range.`);
+    process.exit(1);
+  }
+}
+if (RETRY_MAX_MS < RETRY_BASE_MS) {
+  console.error('FLEX_RETRY_MAX_MS must be >= FLEX_RETRY_BASE_MS.');
+  process.exit(1);
+}
 
 async function loadSnapshot() {
   try {
@@ -72,7 +83,7 @@ async function saveSnapshot(snapshot) {
   await mkdir(dirname(SNAPSHOT_FILE), { recursive: true });
   const temporary = `${SNAPSHOT_FILE}.tmp-${process.pid}-${Date.now()}`;
   try {
-    await writeFile(temporary, JSON.stringify(snapshot, null, 2), { encoding: 'utf8' });
+    await writeFile(temporary, JSON.stringify(snapshot, null, 2), { encoding: 'utf8', mode: 0o600 });
     await rename(temporary, SNAPSHOT_FILE);
   } finally {
     try { await unlink(temporary); } catch (error) {
@@ -181,11 +192,10 @@ async function request(path) {
     const setCookie = SESSION.acceptSetCookie(res.headers);
     const html = await res.text();
     return { res, html, setCookie };
+  } catch {
+    // Do not log remote text, URLs or fetch causes: they can contain secrets.
+    throw Object.assign(new Error('Network request failed or timed out.'), { code: 'NETWORK_FAILURE' });
   } finally { clearTimeout(timeout); }
-}
-if (!Number.isFinite(HEARTBEAT_MS) || HEARTBEAT_MS < 60 * 1000 || HEARTBEAT_MS > 15 * 60 * 1000) {
-  console.error('FLEX_HEARTBEAT_MS must be between 60000 and 900000.');
-  process.exit(1);
 }
 if (LONG_RUN && (!Number.isFinite(LONG_RUN_MS) || LONG_RUN_MS < 60 * 60 * 1000)) {
   console.error('FLEX_LONG_RUN_HOURS must be a number >= 1.');
@@ -196,26 +206,13 @@ async function fetchVerifiedMarks() {
   const { res, html, setCookie } = await request(`/Student/StudentMarks?semid=${encodeURIComponent(SEMESTER_ID)}`);
   verifyAuthenticatedMarksResponse({ responseUrl: res.url, status: res.status, contentType: res.headers.get('content-type') || '', html });
   const current = parseMarksHtml(html);
-  if (String(current.semester.id) !== String(SEMESTER_ID)) throw new Error(`SEMESTER MISMATCH: requested ${SEMESTER_ID}, received ${current.semester.id}.`);
+  if (String(current.semester.id) !== String(SEMESTER_ID)) throw Object.assign(new Error('Requested semester does not match the marks response.'), { code: 'SEMESTER_MISMATCH' });
   return { current, status: res.status, setCookie };
 }
 
-async function heartbeat() {
-  try {
-    const { res, html, setCookie } = await request('/Student/Marks');
-    verifyAuthenticatedMarksResponse({ responseUrl: res.url, status: res.status, contentType: res.headers.get('content-type') || '', html });
-    console.log(`[${stamp()}] HEARTBEAT SUCCESS | session=${sessionFingerprint()} | set-cookie=${setCookie ? 'yes' : 'no'} | auth=valid`);
-  } catch (error) {
-    console.error(`[${stamp()}] HEARTBEAT FAILURE | session=${sessionFingerprint()} | auth=${error?.code === 'LOGIN_REQUIRED' ? 'invalid' : 'unknown'} | ${error.message}`);
-  }
-}
 async function poll() {
   try {
-    let result;
-    try {
-      result = await fetchVerifiedMarks();
-    }
-    catch (error) { throw error; }
+    const result = await fetchVerifiedMarks();
     const { current, status } = result;
     const stats = snapshotStats(current);
     const previous = await loadSnapshot();
@@ -232,60 +229,81 @@ async function poll() {
     if (!previous) {
       await saveSnapshot(current);
       console.log(`[${stamp()}] Baseline saved. Watching FLEX every ${Math.round(POLL_MS / 1000)}s.`);
-      return;
+      return true;
     }
 
     const decision = decidePoll(previous, current);
     if (decision.type === 'unchanged') {
       console.log(`[${stamp()}] WATCHED | session still authenticated | no mark changes.`);
       await saveSnapshot(current);
-      return;
+      return true;
     }
     const changes = decision.changes;
 
-    console.log(`\n[${stamp()}] ${changes.length} mark change(s) detected:`);
+    console.log(`[${stamp()}] MARK CHANGE DETECTED | count=${changes.length}`);
     for (const change of changes) printChange(change);
     console.log('');
 
-    if (!await notifyChanges(changes)) return;
+    if (!await notifyChanges(changes)) return false;
     await saveSnapshot(current);
   } catch (error) {
-    const code = error?.code ? ` ${error.code}` : '';
-    console.error(`[${stamp()}] AUTH/WATCH FAILED${code}: ${error.message}`);
-    console.error(`[${stamp()}] Last valid snapshot was NOT overwritten.`);
-    await SESSION_ALERT_TRACKER.onPollFailure(error?.code === 'MANUAL_INTERVENTION' ? { code: 'LOGIN_REQUIRED' } : error);
+    console.error(`[${stamp()}] ${classifyFailure(error)} | code=${error?.code || 'LOCAL_ERROR'}${error?.status ? ` | HTTP ${error.status}` : ''} | last valid snapshot preserved`);
+    await SESSION_ALERT_TRACKER.onPollFailure(error);
+    return false;
   }
+  return true;
 }
 
 async function watchLoop() {
-  const deadline = LONG_RUN ? Date.now() + LONG_RUN_MS : null;
-  if (LONG_RUN) console.log(`[${stamp()}] LONG SESSION TEST | duration=${LONG_RUN_MS / 3600000}h | heartbeat=${HEARTBEAT_MS / 60000}m`);
-  await poll();
-  if (RUN_ONCE) return;
-
-  // Sequential loop avoids overlapping checks when FLEX is slow.
+  const deadline = LONG_RUN ? Date.now() + LONG_RUN_MS : Infinity;
   let stopping = false;
-  let nextHeartbeat = Date.now() + HEARTBEAT_MS;
-  const stop = () => { stopping = true; };
+  let wake = null;
+  const stop = () => {
+    stopping = true;
+    console.log(`[${stamp()}] SHUTDOWN REQUESTED | finishing current poll`);
+    wake?.();
+  };
+  // Install before the initial request, including in one-shot mode.
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
-  while (!stopping) {
-    const remaining = deadline ? Math.max(0, deadline - Date.now()) : Infinity;
-    if (remaining === 0) break;
-    await new Promise(resolve => setTimeout(resolve, Math.min(POLL_MS, HEARTBEAT_MS, remaining)));
-    if (stopping) break;
-    if (Date.now() >= nextHeartbeat) { await heartbeat(); nextHeartbeat = Date.now() + HEARTBEAT_MS; }
-    await poll();
+  console.log(`[${stamp()}] STARTUP | poll=${POLL_MS}ms | timeout=${REQUEST_TIMEOUT_MS}ms | protected marks route is heartbeat`);
+  if (LONG_RUN) console.log(`[${stamp()}] LONG SESSION TEST | duration=${LONG_RUN_MS / 3600000}h`);
+  let failures = 0;
+  try {
+    while (!stopping && Date.now() < deadline) {
+      const ok = await poll();
+      failures = ok ? 0 : failures + 1;
+      if (RUN_ONCE) {
+        if (!ok) process.exitCode = 1;
+        break;
+      }
+      if (stopping) break;
+      const delay = ok ? POLL_MS : retryDelay(failures, RETRY_BASE_MS, RETRY_MAX_MS);
+      if (!ok) console.log(`[${stamp()}] RETRY | in=${delay}ms | consecutiveFailures=${failures}`);
+      await new Promise(resolve => {
+        const timer = setTimeout(resolve, Math.min(delay, Math.max(0, deadline - Date.now())));
+        wake = () => { clearTimeout(timer); resolve(); };
+      });
+      wake = null;
+    }
+  } finally {
+    process.removeListener('SIGINT', stop);
+    process.removeListener('SIGTERM', stop);
+    console.log(`[${stamp()}] SHUTDOWN COMPLETE`);
   }
-  process.removeListener('SIGINT', stop);
-  process.removeListener('SIGTERM', stop);
-  console.log(`[${stamp()}] SHUTDOWN COMPLETE`);
 }
 
-if (EMAIL_TEST) {
-  await runEmailTest();
-} else if (SELF_TEST) {
-  await runSelfTest();
-} else {
-  await watchLoop();
+// Unexpected programming errors exit nonzero; systemd restarts a clean process.
+function fatal() {
+  console.error(`[${stamp()}] FATAL ERROR | process stopping; inspect configuration and local state`);
+  process.exit(1);
+}
+process.on('unhandledRejection', fatal);
+process.on('uncaughtException', fatal);
+try {
+  if (EMAIL_TEST) await runEmailTest();
+  else if (SELF_TEST) await runSelfTest();
+  else await watchLoop();
+} catch {
+  fatal();
 }

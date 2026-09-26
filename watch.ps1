@@ -1,6 +1,6 @@
 param(
     [ValidateRange(10, 86400)]
-    [int]$Seconds = 60,
+    [int]$Seconds = 300,
 
     [string]$Semester = "20263",
 
