@@ -2,17 +2,17 @@
 
 This file is the permanent source of truth for future Codex sessions. It reflects the repository as inspected on 2026-09-25, branch `main`.
 
-## Current milestone � automatic authentication/session recovery (26 September 2026)
+## Current milestone � session preservation and keep-alive (26 September 2026)
 
-- [x] Review existing implementation, README, history/status and overnight log. User reports authentication from about 23:00 to 03:12:18 (~4h12m); subsequent LOGIN_REQUIRED polls preserve state and the expiry alert works. An unchanged cookie identifier does not establish server-side authentication.
-- [x] Inspect verified login contract: same-origin XHR POST `/login/Login`, form fields `username`, `password`, `cf-turnstile-response`, JSON `{url:"/",status:"done"}`, existing ASP.NET_SessionId retained, and Turnstile executes in-browser.
-- [x] Implement and mock-test bounded recovery controller, protected-page verification before cookie replacement, network/auth distinction and fail-closed adapter. Existing marks comparison remains intact. Correct request timeout lifecycle through body reading.
-- [x] Capture and record the redacted successful browser login contract. Verified findings are documented in `AUTHENTICATION.md` and supplied by the user on 2026-09-26.
-- [x] Implement Playwright login transport, scoped session-cookie extraction, Turnstile wait, response wait, and fail-closed manual intervention; credentials are environment-only. Live FLEX execution remains unverified.
-- [ ] Verify live initial login and expired-session recovery, including snapshot preservation and resumed notification behavior. Mock controller success does not establish live login success.
-- [x] Add mocked browser/recovery coverage for cookie extraction, Turnstile timeout/manual intervention, verification failure, backoff and old-session preservation. Full live recovery remains unverified.
+- [x] Remove the abandoned Playwright/Chromium authentication experiment; Turnstile blocked auto-login.
+- [x] Add a persistent FLEX cookie jar starting from the existing valid ASP.NET_SessionId.
+- [x] Accept and apply FLEX Set-Cookie updates and log redacted session fingerprints.
+- [x] Add authenticated `/Student/Marks` heartbeat every 10�15 minutes.
+- [x] Preserve the last marks snapshot on authentication or network failure.
+- [x] Add bounded long-run mode for 6�8 hour session testing.
+- [ ] Verify a live session survives well beyond the previous approximately 4h12m expiry.
 
-Verification this session: `node --check src/notifier.js` and `npm test` (62 passing). No live credentials submitted and no live marks state changed. Historic checked items below retain their original evidence and do not establish automatic login readiness.
+Success criterion: a valid FLEX session remains authenticated well beyond the previous approximately 4h12m expiry under cookie-jar plus keep-alive behavior.
 
 ## Current implementation assessment
 
@@ -49,13 +49,13 @@ Verification this session: `node --check src/notifier.js` and `npm test` (62 pas
 - [x] Add deterministic mark-change integration coverage. `tests/marks.test.js` exercises the production comparison logic and notification builder for no-change, new, released, obtained/total changes, exact-once detection, and repeat-poll suppression.
 - [x] Verify and harden atomic snapshot persistence. `src/notifier.js` now writes a uniquely named temporary JSON file and renames it into place; syntax and a live one-shot baseline write passed with no temporary residue.
 - [x] Define graceful shutdown behavior. Added SIGINT/SIGTERM handling, documented Ctrl+C behavior, and verified syntax plus a live one-shot after the change.
-- [x] Resolve session refresh expectations. Documented restart-only cookie refresh in `README.md`; the process intentionally uses one cookie for its lifetime.
+- [x] Resolve session refresh expectations. Documented persistent cookie-jar refresh and `/Student/Marks` heartbeat in `README.md`.
 - [x] Add configuration and state hygiene for deployment. Added and verified root `.gitignore` coverage for `data/`, `.env`, `node_modules/`, and `*.log`; runtime snapshots and local secrets are ignored.
 - [x] Review snapshot schema/version validation and migration behavior. Added `validateSnapshot` and tests for malformed, unsupported, and invalid nested state; invalid persisted state fails before comparison and preserves the safe snapshot.
 - [x] Review duplicate and identity edge cases. Existing parser identity tests plus deterministic mark tests cover category/assessment identity, removal without false alerts, reappearance, and obtained/total changes.
 - [x] Review network timeout and retry behavior. Added configurable `FLEX_REQUEST_TIMEOUT_MS` (default 30 seconds, minimum 1 second), wired through `AbortController`, and documented it.
 - [x] Verify dependency and runtime reproducibility. `npm ci` completed with 0 vulnerabilities; Node `v24.18.0`, npm `11.16.0`, and all 58 tests pass.
-- [x] Update `README.md` after behavior changes; timeout, shutdown, and restart-only session refresh are documented.
+- [x] Update `README.md` after behavior changes; timeout, shutdown, cookie rotation, and heartbeat behavior are documented.
 - [x] Perform the final security and release review. Tracked-file scan found no credentials or cookies; secrets are entered at runtime, runtime artifacts are ignored, logs use cookie fingerprints only, `git diff --check` passes, and reproducible install/tests are documented.
 
 ## Ordered milestones

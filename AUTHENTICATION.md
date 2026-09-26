@@ -21,10 +21,8 @@ The observed visible ASP.NET session identifier is not proof of a valid server-s
 
 Do not export an unredacted HAR or copy a credential-bearing curl command. Do not share your FLEX password in chat.
 
-## Implemented recovery scaffold
+## Current supported architecture
 
-FLEX_AUTO_LOGIN=1 opts into the controller. On LOGIN_REQUIRED it calls loginToFlex, verifies the replacement through the existing protected marks parser, and only then updates the active cookie and continues normal snapshot comparison. Network/parser/server failures do not invoke login. The controller allows three attempts with 60/120-second backoff, then requires manual intervention; the existing alert latch suppresses repeated expiry emails.
+The watcher does not attempt login or re-authentication. It starts from a valid cookie, persists all FLEX Set-Cookie updates in a cookie jar, and uses authenticated `/Student/Marks` as a periodic keep-alive. Playwright/Chromium auto-login was tested and abandoned because Turnstile blocked it. No CAPTCHA or Turnstile bypass is used.
 
-The live login adapter deliberately returns MANUAL_INTERVENTION until the request contract and Turnstile requirements are verified. Leave FLEX_AUTO_LOGIN unset for ordinary operation. There are no active FLEX_USERNAME/FLEX_PASSWORD settings yet: accepting credentials without a working verified adapter would be misleading. Future credentials will be environment-only; existing .env ignore rules apply. The app does not automatically load .env files.
-
-Run `node --test --test-isolation=none tests/recovery.test.js` for safe mock verification: replacement-session proof, network classification, bounded retries/backoff and blocked adapter behavior. These tests send no email, alter no snapshot and contact no FLEX service. Initial live login, cookie collection and expiry/re-login remain blocked pending the capture above; Turnstile may require an interactive browser flow.
+The session-preservation experiment succeeds only if the same process remains authenticated well beyond the previous approximately 4h12m expiry. Use `FLEX_LONG_RUN=1` for a bounded 6–8 hour run; failures preserve the last valid marks snapshot.

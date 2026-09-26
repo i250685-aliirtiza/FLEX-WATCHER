@@ -149,9 +149,18 @@ When FLEX invalidates your session or redirects requests to the login page:
 
 This watcher proves that **each poll successfully accessed the authenticated protected marks page with the cookie supplied to the process**. It does not control a browser tab. For a future cloud deployment, per-request authentication proof is the condition that matters.
 
-The cookie is read once when the process starts. If FLEX expires it, stop the watcher and restart it with a newly copied cookie; the process does not silently switch credentials while running.
+The initial cookie is read once, then all FLEX Set-Cookie updates are retained in memory. If FLEX still expires the authenticated session, the watcher preserves the last valid snapshot and reports the failure.
 
-## Automatic session recovery (opt-in)
+## Session preservation experiment
 
-The overnight run expired after approximately 4h12m. Cookie mode still requires manual renewal. An opt-in `FLEX_AUTO_LOGIN=1` recovery scaffold is implemented and mock-tested, but its live login adapter is deliberately blocked pending browser request evidence. Leave this variable unset for normal use. See [AUTHENTICATION.md](./AUTHENTICATION.md) for findings, safe tests and the exact redacted capture needed. Set `FLEX_AUTO_LOGIN=1`, `FLEX_USERNAME`, and `FLEX_PASSWORD` to opt into browser-based recovery. Install the browser once with `npx playwright install chromium`. Credentials remain environment-only and are never logged. If Turnstile or login cannot complete, recovery fails closed and requests manual intervention.
+The watcher starts with a valid `ASP.NET_SessionId` (or complete Cookie header), keeps a persistent FLEX cookie jar, accepts every `Set-Cookie` update, and sends an authenticated `/Student/Marks` heartbeat every 10–15 minutes. Playwright/Chromium auto-login was tested and abandoned because Turnstile blocked it. No CAPTCHA or Turnstile bypass is used, and the watcher never logs in or re-authenticates.
 
+For an 8-hour bounded test:
+
+```powershell
+$env:FLEX_COOKIE = "ASP.NET_SessionId=<your-valid-session-id>"
+$env:FLEX_LONG_RUN = "1"
+$env:FLEX_LONG_RUN_HOURS = "8"
+$env:FLEX_HEARTBEAT_MS = "720000"
+npm start
+```

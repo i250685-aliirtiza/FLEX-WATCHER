@@ -7,7 +7,7 @@ import { buildMarksEmail, buildSessionExpiredEmail, buildTestEmail, loadEmailCon
 import { SessionAlertTracker } from './session-alert.js';
 import { diffMarks } from './marks.js';
 import { validateSnapshot } from './snapshot.js';
-import { SessionRecovery, loginToFlex } from './flex/recovery.js';
+import { FlexSession } from './flex/session.js';
 import { decidePoll } from './poll-decision.js';
 
 const COOKIE_INPUT = process.env.FLEX_COOKIE || process.env.FLEX_SESSION_ID;
@@ -18,6 +18,9 @@ const SNAPSHOT_FILE = process.env.FLEX_SNAPSHOT_FILE || './data/marks-snapshot.j
 const RUN_ONCE = process.env.FLEX_RUN_ONCE === '1';
 const SELF_TEST = process.env.FLEX_SELF_TEST === '1';
 const EMAIL_TEST = process.env.FLEX_EMAIL_TEST === '1';
+const HEARTBEAT_MS = Number(process.env.FLEX_HEARTBEAT_MS || 12 * 60 * 1000);
+const LONG_RUN = process.env.FLEX_LONG_RUN === '1';
+const LONG_RUN_MS = Number(process.env.FLEX_LONG_RUN_HOURS || 8) * 60 * 60 * 1000;
 
 let EMAIL_CONFIG = null;
 try {
@@ -31,9 +34,7 @@ const SESSION_ALERT_TRACKER = new SessionAlertTracker({
   sendAlert: EMAIL_CONFIG
     ? async () => {
         const message = buildSessionExpiredEmail();
-        if (process.env.FLEX_AUTO_LOGIN === '1') {
-          message.text += '\nAutomatic recovery is unavailable or exhausted. Manual intervention required: restart with a valid cookie and consult AUTHENTICATION.md.\n';
-        }
+
         await sendEmail(EMAIL_CONFIG, message);
       }
     : null,
@@ -41,10 +42,10 @@ const SESSION_ALERT_TRACKER = new SessionAlertTracker({
   logError: msg => console.error(`[${stamp()}] ${msg}`),
 });
 
-let COOKIE_HEADER = null;
+let SESSION = null;
 if (!SELF_TEST && !EMAIL_TEST) {
   try {
-    COOKIE_HEADER = COOKIE_INPUT ? normalizeCookieInput(COOKIE_INPUT) : (process.env.FLEX_AUTO_LOGIN === '1' ? null : normalizeCookieInput(COOKIE_INPUT));
+    SESSION = new FlexSession(normalizeCookieInput(COOKIE_INPUT));
   } catch (error) {
     console.error(error.message);
     process.exit(1);
@@ -105,9 +106,7 @@ function snapshotStats(snapshot) {
   return { courses, categories, assessments, released, hash };
 }
 
-function sessionFingerprint(cookieHeader) {
-  return createHash('sha256').update(cookieHeader).digest('hex').slice(0, 8);
-}
+function sessionFingerprint() { return SESSION?.fingerprint() || 'none'; }
 
 function printChange(change) {
   const a = change.now;
@@ -174,63 +173,53 @@ async function notifyChanges(changes) {
   }
 }
 
-async function fetchVerifiedMarks(cookie) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    try {
-    const res = await fetch(MARKS_URL, {
-      headers: {
-        Cookie: cookie,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/142 Safari/537.36',
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-      },
-      redirect: 'follow',
-      signal: controller.signal,
-    });
-
-
+async function request(path) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://flexstudent.nu.edu.pk${path}`, { headers: { Cookie: SESSION.header(), 'User-Agent': 'Mozilla/5.0', Accept: 'text/html,application/xhtml+xml' }, redirect: 'follow', signal: controller.signal });
+    const setCookie = SESSION.acceptSetCookie(res.headers);
     const html = await res.text();
-    verifyAuthenticatedMarksResponse({
-      responseUrl: res.url,
-      status: res.status,
-      contentType: res.headers.get('content-type') || '',
-      html,
-    });
-
-    // Structural parsing is part of the auth proof: a login/challenge/error page
-    // cannot pass this and masquerade as a successful poll.
-    const current = parseMarksHtml(html);
-    if (String(current.semester.id) !== String(SEMESTER_ID)) {
-      throw new Error(`SEMESTER MISMATCH: requested ${SEMESTER_ID}, received ${current.semester.id}.`);
-    }
-
-    return { current, status: res.status };
-    } finally { clearTimeout(timeout); }
+    return { res, html, setCookie };
+  } finally { clearTimeout(timeout); }
+}
+if (!Number.isFinite(HEARTBEAT_MS) || HEARTBEAT_MS < 60 * 1000 || HEARTBEAT_MS > 15 * 60 * 1000) {
+  console.error('FLEX_HEARTBEAT_MS must be between 60000 and 900000.');
+  process.exit(1);
+}
+if (LONG_RUN && (!Number.isFinite(LONG_RUN_MS) || LONG_RUN_MS < 60 * 60 * 1000)) {
+  console.error('FLEX_LONG_RUN_HOURS must be a number >= 1.');
+  process.exit(1);
 }
 
-const RECOVERY = new SessionRecovery({ login: loginToFlex, verify: fetchVerifiedMarks, log: msg => console.log(`[${stamp()}] ${msg}`) });
+async function fetchVerifiedMarks() {
+  const { res, html, setCookie } = await request(`/Student/StudentMarks?semid=${encodeURIComponent(SEMESTER_ID)}`);
+  verifyAuthenticatedMarksResponse({ responseUrl: res.url, status: res.status, contentType: res.headers.get('content-type') || '', html });
+  const current = parseMarksHtml(html);
+  if (String(current.semester.id) !== String(SEMESTER_ID)) throw new Error(`SEMESTER MISMATCH: requested ${SEMESTER_ID}, received ${current.semester.id}.`);
+  return { current, status: res.status, setCookie };
+}
 
+async function heartbeat() {
+  try {
+    const { res, html, setCookie } = await request('/Student/Marks');
+    verifyAuthenticatedMarksResponse({ responseUrl: res.url, status: res.status, contentType: res.headers.get('content-type') || '', html });
+    console.log(`[${stamp()}] HEARTBEAT SUCCESS | session=${sessionFingerprint()} | set-cookie=${setCookie ? 'yes' : 'no'} | auth=valid`);
+  } catch (error) {
+    console.error(`[${stamp()}] HEARTBEAT FAILURE | session=${sessionFingerprint()} | auth=${error?.code === 'LOGIN_REQUIRED' ? 'invalid' : 'unknown'} | ${error.message}`);
+  }
+}
 async function poll() {
   try {
     let result;
     try {
-      if (!COOKIE_HEADER && process.env.FLEX_AUTO_LOGIN === '1') {
-        const recovered = await RECOVERY.recover({ code: 'LOGIN_REQUIRED' });
-        COOKIE_HEADER = recovered.cookie;
-        result = recovered.result;
-      } else result = await fetchVerifiedMarks(COOKIE_HEADER);
+      result = await fetchVerifiedMarks();
     }
-    catch (error) {
-      if (process.env.FLEX_AUTO_LOGIN !== '1') throw error;
-      const recovered = await RECOVERY.recover(error);
-      COOKIE_HEADER = recovered.cookie;
-      result = recovered.result;
-    }
+    catch (error) { throw error; }
     const { current, status } = result;
     const stats = snapshotStats(current);
     const previous = await loadSnapshot();
-    const fp = sessionFingerprint(COOKIE_HEADER);
+    const fp = sessionFingerprint();
 
     console.log(
       `[${stamp()}] AUTH VERIFIED | protected marks route | session=${fp} | ` +
@@ -269,17 +258,23 @@ async function poll() {
 }
 
 async function watchLoop() {
+  const deadline = LONG_RUN ? Date.now() + LONG_RUN_MS : null;
+  if (LONG_RUN) console.log(`[${stamp()}] LONG SESSION TEST | duration=${LONG_RUN_MS / 3600000}h | heartbeat=${HEARTBEAT_MS / 60000}m`);
   await poll();
   if (RUN_ONCE) return;
 
   // Sequential loop avoids overlapping checks when FLEX is slow.
   let stopping = false;
+  let nextHeartbeat = Date.now() + HEARTBEAT_MS;
   const stop = () => { stopping = true; };
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   while (!stopping) {
-    await new Promise(resolve => setTimeout(resolve, POLL_MS));
+    const remaining = deadline ? Math.max(0, deadline - Date.now()) : Infinity;
+    if (remaining === 0) break;
+    await new Promise(resolve => setTimeout(resolve, Math.min(POLL_MS, HEARTBEAT_MS, remaining)));
     if (stopping) break;
+    if (Date.now() >= nextHeartbeat) { await heartbeat(); nextHeartbeat = Date.now() + HEARTBEAT_MS; }
     await poll();
   }
   process.removeListener('SIGINT', stop);
