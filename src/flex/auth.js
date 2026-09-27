@@ -91,7 +91,10 @@ export function verifyAuthenticatedTranscriptResponse({ responseUrl, status, con
   if (status === 401 || status === 403) fail(`FLEX session is no longer authenticated (HTTP ${status}).`, 'LOGIN_REQUIRED');
   if (!Number.isInteger(status) || status < 200 || status >= 300) throw Object.assign(new FlexAuthError(`FLEX returned HTTP ${status}.`, 'HTTP_ERROR'), { status });
   let final; try { final = new URL(responseUrl); } catch { fail('Invalid final response URL.', 'ROUTING_FAILED'); }
-  if (final.protocol !== 'https:' || final.hostname.toLowerCase() !== 'flexstudent.nu.edu.pk' || !/^\/student\/transcript(?:\/|$)/i.test(final.pathname)) fail('Unexpected transcript response route.', 'ROUTING_FAILED');
+  if (final.protocol !== 'https:' || final.hostname.toLowerCase() !== 'flexstudent.nu.edu.pk') fail(`Unexpected transcript origin ${final.origin}.`, 'ROUTING_FAILED');
+  const transcriptPath = final.pathname.replace(/\/+$/, '').toLowerCase();
+  if (transcriptPath.includes('/login') || transcriptPath.includes('/account/login')) fail('FLEX transcript request landed on the login page.', 'LOGIN_REQUIRED');
+  if (!/^\/student\/transcript(?:\/|$)/i.test(final.pathname)) fail(`Unexpected transcript path ${final.pathname}.`, 'ROUTING_FAILED');
   if (typeof html !== 'string' || !html.length) fail('FLEX returned an empty transcript response.', 'INVALID_HTML');
   if (contentType && !contentType.toLowerCase().includes('text/html')) fail('Expected HTML transcript response.', 'INVALID_CONTENT_TYPE');
   if (/<input\b[^>]*\btype\s*=\s*["']?password\b/i.test(html)) fail('FLEX returned login markup.', 'LOGIN_REQUIRED');
