@@ -1,190 +1,194 @@
-# FLEX Marks Watcher
+# FLEX Marks Notifier
 
-For Windows, see [DEPLOYMENT.md](./DEPLOYMENT.md). For Oracle Cloud Ubuntu, use the production runbook below and the committed [systemd unit](./deploy/flex-marks-notifier.service).
+FLEX Marks Notifier watches your authenticated FAST FLEX marks page and emails you when a mark is released or changed. It runs as a small always-on Node.js service on an Oracle Cloud Ubuntu VM.
 
-Polls the authenticated FAST FLEX marks page, validates the session on every poll, compares normalized marks against the last valid snapshot, and can email you when a mark is released or changed.
+The watcher does not log in to FLEX, store your FLEX password, solve CAPTCHAs, or bypass Turnstile. You first obtain a valid FLEX session cookie in your normal browser, then provide that cookie to the service. The protected marks request is the authentication and health check.
 
-It does **not** log in for you, solve Cloudflare challenges, or bypass FLEX authentication. It uses a session/cookie you already obtained legitimately in your browser.
+## What you need
 
+- A FAST/FLEX student account and a browser where you can log in normally.
+- An Oracle Cloud account and an Ubuntu VM with internet access.
+- An SSH key pair. Oracle uses the public key for SSH; the VM has no default password login.
+- Optional: an SMTP account. Gmail users should use a Google App Password.
 
-## Oracle Cloud Ubuntu deployment
+## 1. Create an Oracle Cloud account
 
-The service uses the protected marks request as its authentication check; no separate heartbeat endpoint is polled. Defaults are a five minute poll, 30 second request timeout, and capped exponential retry after failures. Override them in the environment file with `FLEX_POLL_MS`, `FLEX_REQUEST_TIMEOUT_MS`, `FLEX_RETRY_BASE_MS`, and `FLEX_RETRY_MAX_MS`.
+Open [Oracle Cloud Free Tier](https://www.oracle.com/cloud/free/) and create an account. Oracle may request phone verification and a payment card for identity verification; check the current [Free Tier terms and resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier.htm) before continuing. Choose a home region close to you. Oracle Always Free capacity depends on region and availability.
 
-On a fresh Ubuntu VM (Node.js 20+ is required):
+## 2. Create the Ubuntu VM
+
+In the Oracle Cloud Console:
+
+1. Open **Compute → Instances → Create instance**.
+2. Give it a name such as `flex-marks-notifier`.
+3. Select an Ubuntu image (Ubuntu 22.04 or newer is recommended).
+4. Select an Always Free eligible shape if available. ARM Ampere is fine; this project is pure Node.js.
+5. Keep the default boot volume and public IPv4 address settings.
+6. Under **Add SSH keys**, upload your public key or paste it.
+7. Click **Create** and wait until the instance is running.
+
+Copy the instance's public IP address. Oracle's [instance creation guide](https://docs.oracle.com/en-us/iaas/Content/Compute/Tasks/launchinginstance.htm) shows the current console screens.
+
+From your computer, connect as `ubuntu`:
 
 ```bash
-sudo apt update && sudo apt install -y git curl ca-certificates
+ssh -i ~/.ssh/your-oracle-key ubuntu@YOUR_PUBLIC_IP
+```
+
+On Windows PowerShell, the same command is usually:
+
+```powershell
+ssh -i "$env:USERPROFILE\.ssh\your-oracle-key" ubuntu@YOUR_PUBLIC_IP
+```
+
+If SSH does not connect, check that the instance is running and that its subnet security list allows TCP port 22. No inbound port is required for this watcher beyond SSH.
+
+## 3. Install Node.js and download the project
+
+Run these commands inside the Ubuntu VM. NodeSource publishes Node.js packages for supported Ubuntu versions and architectures ([installation instructions](https://github.com/nodesource/distributions#installation-instructions)).
+
+```bash
+sudo apt update
+sudo apt install -y git curl ca-certificates
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
+node --version
+npm --version
+
 sudo useradd --system --home /opt/flex-marks-notifier --shell /usr/sbin/nologin flex-watcher
 sudo git clone https://github.com/i250685-aliirtiza/FLEX-WATCHER.git /opt/flex-marks-notifier
 sudo chown -R flex-watcher:flex-watcher /opt/flex-marks-notifier
-cd /opt/flex-marks-notifier && sudo -u flex-watcher npm ci --omit=dev
-sudo install -m 0600 -o root -g root .env.example /etc/flex-marks-notifier.env
-sudoedit /etc/flex-marks-notifier.env
-sudo install -m 0644 deploy/flex-marks-notifier.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now flex-marks-notifier
+cd /opt/flex-marks-notifier
+sudo -u flex-watcher npm ci --omit=dev
 ```
 
-Manage it with `sudo systemctl status flex-marks-notifier`, `sudo systemctl restart flex-marks-notifier`, `sudo systemctl stop flex-marks-notifier`, and `sudo journalctl -u flex-marks-notifier -f`. To replace an expired cookie, edit only `FLEX_COOKIE` (`sudoedit /etc/flex-marks-notifier.env`), then run `sudo systemctl restart flex-marks-notifier`; the next valid poll logs `AUTH VERIFIED` and the expiry alert latch resets. Never put the cookie in Git, shell history, or issue reports.
+The project requires Node.js 20.19 or newer.
 
-## What `AUTH VERIFIED` means
+## 4. Get your FLEX cookie safely
 
-A poll prints `AUTH VERIFIED` only after all of these pass:
+On your own computer:
 
-1. FLEX returned HTTP 2xx.
-2. The final URL is `https://flexstudent.nu.edu.pk/Student/StudentMarks`.
-3. The response is HTML.
-4. No login form is present.
-5. No Cloudflare/human-verification page is present.
-6. The strict marks parser validates the semester/course/assessment DOM.
-7. The parsed semester matches the requested semester.
+1. Log in to FLEX normally in your browser.
+2. Open Developer Tools → **Application/Storage → Cookies** for `flexstudent.nu.edu.pk`.
+3. Copy the complete cookie header if possible, or copy the current `ASP.NET_SessionId` value.
+4. Treat it like a password. Do not paste it into Git, chat, screenshots, or a shell command that will remain in history.
 
-A generic HTTP 200 page is therefore **not** enough.
+A cookie expires eventually. The service cannot renew it by logging in for you.
 
-## Install and test
+## 5. Configure the service
 
-Requirements: Node.js 20.19+ and npm.
+Create the root-owned environment file from the committed template:
 
-```powershell
+```bash
+sudo install -m 0600 -o root -g root /opt/flex-marks-notifier/.env.example /etc/flex-marks-notifier.env
+sudoedit /etc/flex-marks-notifier.env
+```
+
+Set at least these values:
+
+```ini
+FLEX_COOKIE="ASP.NET_SessionId=PASTE_YOUR_CURRENT_COOKIE"
+FLEX_SEMESTER_ID=20263
+FLEX_SNAPSHOT_FILE=/var/lib/flex-marks-notifier/marks-snapshot.json
+FLEX_POLL_MS=300000
+FLEX_REQUEST_TIMEOUT_MS=30000
+FLEX_RETRY_BASE_MS=300000
+FLEX_RETRY_MAX_MS=1800000
+```
+
+Replace `20263` with the semester ID you want to watch. Keep the quotation marks if the cookie contains spaces or multiple cookie values. Verify permissions:
+
+```bash
+sudo chown root:root /etc/flex-marks-notifier.env
+sudo chmod 600 /etc/flex-marks-notifier.env
+sudo grep -E '^(FLEX_SEMESTER_ID|FLEX_POLL_MS|FLEX_REQUEST_TIMEOUT_MS)=' /etc/flex-marks-notifier.env
+```
+
+### Optional email notifications
+
+Add all three required values together:
+
+```ini
+FLEX_SMTP_USER=your-address@gmail.com
+FLEX_SMTP_PASS="your-google-app-password"
+FLEX_EMAIL_TO=your-address@gmail.com
+FLEX_EMAIL_FROM=your-address@gmail.com
+FLEX_SMTP_HOST=smtp.gmail.com
+FLEX_SMTP_PORT=465
+```
+
+For Gmail, create an App Password in your Google Account. Never use your normal Google password. Email sends one alert for a session expiry and suppresses repeats until a valid poll succeeds.
+
+## 6. Install and start systemd
+
+The repository includes [deploy/flex-marks-notifier.service](./deploy/flex-marks-notifier.service):
+
+```bash
+sudo install -m 0644 /opt/flex-marks-notifier/deploy/flex-marks-notifier.service /etc/systemd/system/flex-marks-notifier.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now flex-marks-notifier
+sudo systemctl status flex-marks-notifier --no-pager
+```
+
+Useful commands:
+
+```bash
+sudo systemctl start flex-marks-notifier
+sudo systemctl stop flex-marks-notifier
+sudo systemctl restart flex-marks-notifier
+sudo systemctl status flex-marks-notifier
+sudo journalctl -u flex-marks-notifier -f
+sudo journalctl -u flex-marks-notifier -n 100 --no-pager
+```
+
+Healthy logs contain `AUTH VERIFIED` and `WATCHED | no mark changes`. A first successful poll creates the baseline and does not send an email.
+
+## 7. Replace an expired cookie
+
+When the logs show `AUTH EXPIRED`:
+
+```bash
+sudoedit /etc/flex-marks-notifier.env
+# replace only FLEX_COOKIE, then save
+sudo chmod 600 /etc/flex-marks-notifier.env
+sudo systemctl restart flex-marks-notifier
+sudo journalctl -u flex-marks-notifier -f
+```
+
+After a valid poll, the service logs `AUTH VERIFIED`, resets the one-time expiry alert, and continues using the existing last valid snapshot.
+
+## 8. Updating the project
+
+```bash
+sudo systemctl stop flex-marks-notifier
+cd /opt/flex-marks-notifier
+sudo git pull --ff-only origin main
+sudo -u flex-watcher npm ci --omit=dev
+sudo systemctl daemon-reload
+sudo systemctl start flex-marks-notifier
+sudo systemctl status flex-marks-notifier --no-pager
+```
+
+The environment file and snapshot are outside the Git checkout, so updates do not replace them.
+
+## Local development and tests
+
+```bash
 npm ci
 npm test
 ```
 
-## Run without email
+For a one-shot local check, set `FLEX_RUN_ONCE=1` and provide a valid cookie. Do not put real credentials in tracked files. `.env.example` contains placeholders only; `.env`, `data/`, logs, captures, and key files are ignored.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\watch.ps1 -Seconds 60
-```
+## Troubleshooting
 
-The script asks for your FLEX cookie with hidden input. Paste either the raw `ASP.NET_SessionId` value or a complete browser `Cookie` header.
+- **`AUTH EXPIRED`**: obtain a fresh browser cookie and restart the service.
+- **`TRANSIENT FAILURE`**: check DNS, VM internet access, and FLEX availability. The saved snapshot is preserved.
+- **`FLEX HTTP FAILURE`**: FLEX returned a server/error status; wait and let retry/backoff run.
+- **`UNEXPECTED FLEX RESPONSE`**: FLEX returned a login, challenge, malformed, or unexpected page. Do not treat HTTP 200 alone as authentication.
+- **No email**: check all three required SMTP variables, use a Gmail App Password, and inspect `journalctl` for SMTP errors.
+- **Service will not start**: run `sudo journalctl -u flex-marks-notifier -n 100 --no-pager` and verify `/etc/flex-marks-notifier.env` permissions and values.
 
-Healthy output looks like:
+## Scope and live validation
 
-```text
-[9/25/2026, 8:10:00 PM] AUTH VERIFIED | protected marks route | session=1a2b3c4d | semester=20263 | HTTP 200 | courses=9 | assessments=20 | released=19 | snapshot=...
-[9/25/2026, 8:10:00 PM] WATCHED | session still authenticated | no mark changes.
-```
-
-`session=1a2b3c4d` is only the first 8 characters of a SHA-256 fingerprint of the cookie. The cookie itself is never printed.
-
-## Email notifications
-
-Email is optional. The watcher uses implicit-TLS SMTP and defaults to Gmail's `smtp.gmail.com:465`.
-
-For Gmail, use a **Google App Password**, not your normal Google password. The App Password is prompted with hidden input and is not written to the repository or snapshot.
-
-First test email delivery without touching FLEX or the saved marks snapshot:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\email-test.ps1 -SmtpUser "you@gmail.com" -EmailTo "you@gmail.com"
-```
-
-If delivery succeeds, you should see:
-
-```text
-EMAIL TEST PASS | host=smtp.gmail.com:465 | recipients=1
-```
-
-Then run the watcher with email enabled:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\watch.ps1 -Seconds 60 -Email -SmtpUser "you@gmail.com" -EmailTo "you@gmail.com"
-```
-
-When FLEX changes a student mark, the watcher prints the change and sends one email containing all changes detected in that poll.
-
-Examples:
-
-```text
-[NEW MARK] CS2001 | Quiz 2: 8/10
-[MARK CHANGED] MT1004 | Assignment 1: 7 -> 9/10
-```
-
-If email delivery fails after a mark change, the watcher **does not advance the saved snapshot**. The same change is retried on the next poll instead of being silently lost.
-
-Class average, minimum, maximum, and standard-deviation-only changes are ignored by the normalized snapshot.
-
-## Email environment variables
-
-The PowerShell scripts are convenient for local use. A cloud deployment can set these environment variables directly:
-
-```text
-FLEX_SMTP_USER=you@gmail.com
-FLEX_SMTP_PASS=your-app-password
-FLEX_EMAIL_TO=you@gmail.com
-FLEX_EMAIL_FROM=you@gmail.com      # optional; defaults to SMTP user
-FLEX_SMTP_HOST=smtp.gmail.com      # optional
-FLEX_SMTP_PORT=465                 # optional
-```
-
-Email settings are considered enabled when any email setting is present. `FLEX_SMTP_USER`, `FLEX_SMTP_PASS`, and `FLEX_EMAIL_TO` must then all be present.
-
-## Manual FLEX environment variables
-
-```powershell
-$env:FLEX_SESSION_ID="PASTE_RAW_SESSION_ID_VALUE"
-$env:FLEX_SEMESTER_ID="20263"
-$env:FLEX_POLL_MS="60000"
-npm start
-```
-
-Requests time out after 30 seconds by default. Set `FLEX_REQUEST_TIMEOUT_MS` to change this (minimum 1000 ms).
-Press Ctrl+C to stop the watcher; it finishes the current poll and exits without replacing the last safe snapshot.
-
-For a full cookie header use `FLEX_COOKIE` instead. `FLEX_COOKIE` takes precedence over `FLEX_SESSION_ID`.
-
-## One-shot FLEX check
-
-```powershell
-$env:FLEX_RUN_ONCE="1"
-npm start
-Remove-Item Env:FLEX_RUN_ONCE
-```
-
-## Snapshot behavior
-
-The first successful authenticated fetch becomes `data/marks-snapshot.json`.
-
-Later successful polls compare marks against that snapshot. Failed authentication, Cloudflare pages, parser failures, semester mismatches, suspicious course-count/assessment-count drops, and failed mark-notification emails do **not** overwrite the last safe baseline.
-
-## Tests
-
-```powershell
-npm test
-npm run test:auth
-npm run test:email
-npm run test:session
-```
-
-The test suite covers the marks parser, authentication response verification, email configuration/message generation, and session-expiry alerting/latching. The live email test is intentionally separate because it requires your SMTP credentials.
-
-## Session expiry alerts
-
-When FLEX invalidates your session or redirects requests to the login page:
-- The watcher fails closed and preserves the last valid marks snapshot.
-- If email is configured, the watcher immediately sends an alert email informing you that the session has expired and a fresh cookie is needed.
-- To prevent spam, the alert is sent only once per outage.
-- When an updated, valid session cookie is provided and the watcher successfully retrieves marks again (`AUTH VERIFIED`), the alert latch is automatically reset.
-
-## Current limitation
-
-This watcher proves that **each poll successfully accessed the authenticated protected marks page with the cookie supplied to the process**. It does not control a browser tab. For a future cloud deployment, per-request authentication proof is the condition that matters.
-
-The initial cookie is read once, then all FLEX Set-Cookie updates are retained in memory. If FLEX still expires the authenticated session, the watcher preserves the last valid snapshot and reports the failure.
-
-## Session preservation experiment
-
-The watcher starts with a valid `ASP.NET_SessionId` (or complete Cookie header), keeps a persistent FLEX cookie jar, accepts every `Set-Cookie` update, and sends an authenticated `/Student/Marks` heartbeat every 10–15 minutes. Playwright/Chromium auto-login was tested and abandoned because Turnstile blocked it. No CAPTCHA or Turnstile bypass is used, and the watcher never logs in or re-authenticates.
-
-For an 8-hour bounded test:
-
-```powershell
-$env:FLEX_COOKIE = "ASP.NET_SessionId=<your-valid-session-id>"
-$env:FLEX_LONG_RUN = "1"
-$env:FLEX_LONG_RUN_HOURS = "8"
-$env:FLEX_HEARTBEAT_MS = "720000"
-npm start
-```
+The watcher preserves the last valid marks snapshot on network, FLEX, parser, and notification failures; avoids overlapping polling; restarts after crashes; and handles SIGINT/SIGTERM. Remaining validation requires a real deployment: an overnight Oracle soak test (including approximately 03:00–03:15), and a real mark-change notification when a professor uploads or changes marks.
