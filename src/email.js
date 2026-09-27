@@ -276,3 +276,11 @@ export async function sendEmail(config, message, { timeoutMs = 15000 } = {}) {
     socket.destroy();
   }
 }
+
+
+export function buildTranscriptEmail(changes, detectedAt = new Date()) {
+  if (!changes.length) throw new Error('Transcript email requires changes.');
+  const lines=['FLEX Transcript Watcher', `Detected: ${detectedAt.toLocaleString()}`, ''];
+  for (const change of changes) { lines.push('[TRANSCRIPT GRADE UPDATED]', `${change.term} | ${change.now.code} - ${change.now.name}`, `Grade: ${change.old?.grade ?? 'not previously present'} -> ${change.now.grade}`, `Points: ${change.old?.points || '—'} -> ${change.now.points || '—'}`, ''); }
+  return { subject: cleanHeader(changes.length === 1 ? `FLEX - Grade Updated: ${changes[0].now.code}` : `FLEX - ${changes.length} Transcript Grades Updated`, 'email subject'), text: lines.join('\n') };
+}

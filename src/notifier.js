@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parseMarksHtml } from './flex/parser.js';
-import { normalizeCookieInput, verifyAuthenticatedMarksResponse } from './flex/auth.js';
-import { buildMarksEmail, buildSessionExpiredEmail, buildTestEmail, loadEmailConfig, sendEmail } from './email.js';
+import { parseTranscriptHtml, diffTranscript } from './flex/transcript.js';
+import { normalizeCookieInput, verifyAuthenticatedMarksResponse, verifyAuthenticatedTranscriptResponse } from './flex/auth.js';
+import { buildMarksEmail, buildTranscriptEmail, buildSessionExpiredEmail, buildTestEmail, loadEmailConfig, sendEmail } from './email.js';
 import { SessionAlertTracker } from './session-alert.js';
 import { diffMarks } from './marks.js';
 import { validateSnapshot } from './snapshot.js';
@@ -13,6 +14,8 @@ import { retryDelay, classifyFailure } from './retry.js';
 
 const COOKIE_INPUT = process.env.FLEX_COOKIE || process.env.FLEX_SESSION_ID;
 const SEMESTER_ID = process.env.FLEX_SEMESTER_ID || '20263';
+const TRANSCRIPT_PATH = process.env.FLEX_TRANSCRIPT_PATH || '';
+const TRANSCRIPT_SNAPSHOT_FILE = process.env.FLEX_TRANSCRIPT_SNAPSHOT_FILE || './data/transcript-snapshot.json';
 const POLL_MS = Number(process.env.FLEX_POLL_MS || 300000);
 const REQUEST_TIMEOUT_MS = Number(process.env.FLEX_REQUEST_TIMEOUT_MS || 30000);
 const SNAPSHOT_FILE = process.env.FLEX_SNAPSHOT_FILE || './data/marks-snapshot.json';
@@ -78,6 +81,14 @@ async function loadSnapshot() {
     throw error;
   }
 }
+
+async function saveTranscriptSnapshot(snapshot) {
+  const temporary = `${TRANSCRIPT_SNAPSHOT_FILE}.tmp-${process.pid}-${Date.now()}`;
+  await mkdir(dirname(TRANSCRIPT_SNAPSHOT_FILE), { recursive: true });
+  try { await writeFile(temporary, JSON.stringify(snapshot, null, 2), { encoding: 'utf8', mode: 0o600 }); await rename(temporary, TRANSCRIPT_SNAPSHOT_FILE); } finally { try { await unlink(temporary); } catch (error) { if (error?.code !== 'ENOENT') throw error; } }
+}
+
+async function loadTranscriptSnapshot() { try { return JSON.parse(await readFile(TRANSCRIPT_SNAPSHOT_FILE, 'utf8')); } catch (error) { if (error?.code === 'ENOENT') return null; throw error; } }
 
 async function saveSnapshot(snapshot) {
   await mkdir(dirname(SNAPSHOT_FILE), { recursive: true });
@@ -202,6 +213,28 @@ if (LONG_RUN && (!Number.isFinite(LONG_RUN_MS) || LONG_RUN_MS < 60 * 60 * 1000))
   process.exit(1);
 }
 
+async function fetchTranscript() {
+  if (!TRANSCRIPT_PATH) return null;
+  const { res, html } = await request(TRANSCRIPT_PATH);
+  verifyAuthenticatedTranscriptResponse({ responseUrl: res.url, status: res.status, contentType: res.headers.get('content-type') || '', html });
+  return parseTranscriptHtml(html, { currentSemester: process.env.FLEX_TRANSCRIPT_SEMESTER || '' });
+}
+
+async function pollTranscript() {
+  const current = await fetchTranscript();
+  if (!current) return true;
+  const previous = await loadTranscriptSnapshot();
+  if (!previous) { await saveTranscriptSnapshot(current); console.log(`[${stamp()}] TRANSCRIPT BASELINE SAVED | semesters=${current.semesters.length}`); return true; }
+  const changes = diffTranscript(previous, current);
+  if (!changes.length) { await saveTranscriptSnapshot(current); console.log(`[${stamp()}] TRANSCRIPT WATCHED | no grade changes`); return true; }
+  console.log(`[${stamp()}] TRANSCRIPT GRADE CHANGE DETECTED | count=${changes.length}`);
+  if (!EMAIL_CONFIG) { console.log(`[${stamp()}] EMAIL DISABLED | transcript changes remain terminal-only.`); await saveTranscriptSnapshot(current); return true; }
+  const result = await sendEmail(EMAIL_CONFIG, buildTranscriptEmail(changes));
+  console.log(`[${stamp()}] TRANSCRIPT EMAIL SENT | recipients=${result.recipients}`);
+  await saveTranscriptSnapshot(current);
+  return true;
+}
+
 async function fetchVerifiedMarks() {
   const { res, html, setCookie } = await request(`/Student/StudentMarks?semid=${encodeURIComponent(SEMESTER_ID)}`);
   verifyAuthenticatedMarksResponse({ responseUrl: res.url, status: res.status, contentType: res.headers.get('content-type') || '', html });
@@ -229,6 +262,7 @@ async function poll() {
     if (!previous) {
       await saveSnapshot(current);
       console.log(`[${stamp()}] Baseline saved. Watching FLEX every ${Math.round(POLL_MS / 1000)}s.`);
+      await pollTranscript();
       return true;
     }
 
@@ -236,6 +270,7 @@ async function poll() {
     if (decision.type === 'unchanged') {
       console.log(`[${stamp()}] WATCHED | session still authenticated | no mark changes.`);
       await saveSnapshot(current);
+      await pollTranscript();
       return true;
     }
     const changes = decision.changes;
@@ -246,6 +281,7 @@ async function poll() {
 
     if (!await notifyChanges(changes)) return false;
     await saveSnapshot(current);
+    await pollTranscript();
   } catch (error) {
     console.error(`[${stamp()}] ${classifyFailure(error)} | code=${error?.code || 'LOCAL_ERROR'}${error?.status ? ` | HTTP ${error.status}` : ''} | last valid snapshot preserved`);
     await SESSION_ALERT_TRACKER.onPollFailure(error);
