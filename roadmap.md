@@ -10,8 +10,8 @@ This file is the permanent source of truth for future Codex sessions. It reflect
 - [x] Add authenticated `/Student/Marks` heartbeat every 10ï¿½15 minutes.
 - [x] Preserve the last marks snapshot on authentication or network failure.
 - [x] Add bounded long-run mode for 6ï¿½8 hour session testing.
-- [ ] Verify a live session survives well beyond the previous approximately 4h12m expiry (overnight Oracle soak; observe approximately 03:00ï¿½03:15).
-- [ ] Validate a real mark-change notification when a professor uploads or changes marks.`r`n- [x] Add transcript monitoring with I-to-posted-grade change detection and email notification; live transcript-token validation remains deployment-specific.
+- [ ] Verify a live session survives well beyond the previous approximately 4h12m expiry (overnight Oracle soak; observe approximately 03:00–03:15).
+- [ ] Validate a real mark-change notification when a professor uploads or changes marks.
 
 Success criterion: a valid FLEX session remains authenticated well beyond the previous approximately 4h12m expiry under cookie-jar plus keep-alive behavior.
 

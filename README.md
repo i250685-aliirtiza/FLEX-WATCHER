@@ -119,20 +119,6 @@ FLEX_SMTP_PORT=465
 
 For Gmail, create an App Password in your Google Account. Never use your normal Google password. Email sends one alert for a session expiry and suppresses repeats until a valid poll succeeds.
 
-## Transcript grade monitoring
-
-The watcher can also monitor the FLEX **Transcript** page. When the current semester changes from `I` (pending/incomplete) to a posted grade such as `A`, `B+`, or `C`, you receive an email. The first transcript check creates a baseline and does not email existing grades.
-
-Copy the transcript URL path and query string from your browser, without committing the full URL or token. For example:
-
-```ini
-FLEX_TRANSCRIPT_PATH=/Student/Transcript?dump=PASTE_CURRENT_DUMP_TOKEN
-FLEX_TRANSCRIPT_SEMESTER=Fall 2026
-FLEX_TRANSCRIPT_SNAPSHOT_FILE=/var/lib/flex-marks-notifier/transcript-snapshot.json
-```
-
-The dump token can expire or change. If transcript checks show `AUTH EXPIRED` or `UNEXPECTED FLEX RESPONSE`, copy a fresh transcript URL from FLEX, update `FLEX_TRANSCRIPT_PATH`, and restart the service.
-
 ## 6. Install and start systemd
 
 The repository includes [deploy/flex-marks-notifier.service](./deploy/flex-marks-notifier.service):
