@@ -16,3 +16,5 @@ test-results/
 # Persistent Chromium state (never commit)
 chrome-profile/
 /var/lib/flex-marks-notifier/chrome-profile/
+
+node_modules/
