@@ -76,7 +76,7 @@ export function buildMarksEmail(change, detectedAt = new Date()) {
   const text = ['FLEX Marks Update', heading, '', ...fields.map(([key, value]) => `${key}: ${value}`)].join('\n') + '\n';
   const rows = fields.map(([key, value]) => `<tr><td style="padding:10px 0;border-bottom:1px solid #edf0f3;color:#64748b;width:38%;vertical-align:top">${escapeHtml(key)}</td><td style="padding:10px 0 10px 12px;border-bottom:1px solid #edf0f3;word-break:break-word">${escapeHtml(value)}</td></tr>`).join('');
   const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><meta charset="utf-8"></head><body style="margin:0;background:#f3f5f8;color:#172033;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:24px 12px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border:1px solid #e2e8f0;border-radius:12px"><tr><td style="padding:28px 24px"><p style="margin:0 0 20px;font-size:12px;letter-spacing:2px;color:#64748b">FLEX MARKS UPDATE</p><p style="margin:0 0 12px;color:#2563eb;font-size:13px">${escapeHtml(heading)}</p><h1 style="margin:0 0 8px;font-size:24px;word-break:break-word">${escapeHtml(course)}</h1><p style="margin:0;font-size:18px;color:#64748b">${escapeHtml(assessment)}</p><div style="margin:24px 0;padding:24px 12px;background:#f8fafc;text-align:center;border-radius:8px"><div style="font-size:38px;font-weight:bold">${escapeHtml(score(a))}</div>${percentage ? `<p style="margin:8px 0 0;color:#2563eb;font-size:20px">${escapeHtml(percentage)}</p>` : ''}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:14px;line-height:1.5">${rows}</table></td></tr></table></td></tr></table></body></html>`;
-  return { subject: cleanHeader(`${course} ${assessment} — ${score(a)}`, 'email subject'), text, html };
+  return { subject: cleanHeader(`${course} ${assessment} \u2014 ${score(a)}`, 'email subject'), text, html };
 }
 
 export function buildTestEmail(now = new Date()) {
@@ -94,21 +94,17 @@ export function buildTestEmail(now = new Date()) {
   };
 }
 
-export function buildSessionExpiredEmail(detectedAt = new Date()) {
-  return {
-    subject: 'FLEX Watcher Alert - Session Expired',
-    text: [
-      'FLEX Marks Watcher Alert',
-      `Detected: ${detectedAt.toLocaleString()}`,
-      '',
-      'Your FLEX session is no longer authenticated.',
-      'A new session cookie is required.',
-      '',
-      'The watcher will continue polling, but marks cannot be checked until a valid session is provided.',
-      'The saved marks snapshot remains unchanged.',
-      '',
-    ].join('\n'),
-  };
+export function buildSessionExpiredEmail(detectedAt = new Date(), recoveryUrl = '') {
+  const safeUrl = /^https:\/\//i.test(String(recoveryUrl)) ? String(recoveryUrl) : '';
+  const detected = detectedAt.toLocaleString();
+  const text = ['FLEX Watcher \u2014 Login Required', '', 'Your FLEX authentication session was lost.', 'Marks monitoring is paused. The server is still running and no marks will be processed until authentication returns.', `Detected: ${detected}`, safeUrl ? `Re-authenticate FLEX: ${safeUrl}` : 'Open the configured private browser access page to log in manually.', ''].join('\n');
+  const button = safeUrl ? `<p style="margin:24px 0"><a href="${escapeHtml(safeUrl)}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:14px 22px;border-radius:8px;font-weight:bold">Re-authenticate FLEX</a></p>` : '';
+  return { subject: '\uD83D\uDD10 FLEX Watcher \u2014 Login Required', text, html: `<!doctype html><html><body style="margin:0;background:#f3f5f8;font-family:Arial;color:#172033"><table role="presentation" width="100%"><tr><td align="center" style="padding:24px"><table role="presentation" style="max-width:560px;background:#fff;padding:28px;border:1px solid #e2e8f0;border-radius:12px"><tr><td><h1 style="font-size:24px">FLEX Watcher \u2014 Login Required</h1><p>Your FLEX authentication session was lost. Marks monitoring is temporarily paused; the server is still running.</p><p>Detected: ${escapeHtml(detected)}</p>${button}<p style="color:#64748b">No passwords, cookies, or session secrets are included in this message.</p></td></tr></table></td></tr></table></body></html>` };
+}
+
+export function buildRecoveryEmail(recoveredAt = new Date(), pollMs = 15000) {
+  const detected = recoveredAt.toLocaleString();
+  return { subject: '\u2705 FLEX Watcher Back Online', text: `FLEX Watcher Back Online\n\nAuthentication restored successfully. FLEX marks monitoring has resumed automatically.\nRecovered: ${detected}\nPoll interval: ${Math.round(pollMs / 1000)} seconds\n`, html: `<!doctype html><html><body style="margin:0;background:#f3f5f8;font-family:Arial;color:#172033"><table role="presentation" width="100%"><tr><td align="center" style="padding:24px"><table role="presentation" style="max-width:560px;background:#fff;padding:28px;border:1px solid #e2e8f0;border-radius:12px"><tr><td><h1 style="color:#15803d">FLEX Watcher Back Online</h1><p>Authentication restored successfully. FLEX marks monitoring has resumed automatically.</p><p>Recovered: ${escapeHtml(detected)}<br>Poll interval: ${Math.round(pollMs / 1000)} seconds</p></td></tr></table></td></tr></table></body></html>` };
 }
 
 class SmtpReader {

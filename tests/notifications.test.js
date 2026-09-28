@@ -22,7 +22,7 @@ for (const count of [0, 1, 3, 7]) {
     assert.equal(sent.length, count);
     assert.ok(maxActive <= 1);
     for (let i = 0; i < count; i++) {
-      assert.equal(sent[i].subject, `Course-${i} Quiz ${i + 1} — 9/10`);
+      assert.equal(sent[i].subject, `Course-${i} Quiz ${i + 1} \u2014 9/10`);
       for (let j = 0; j < count; j++) if (j !== i) {
         assert.ok(!sent[i].text.includes(`Course-${j}`));
         assert.ok(!sent[i].html.includes(`Course-${j}`));

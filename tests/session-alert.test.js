@@ -6,10 +6,10 @@ import { FlexAuthError, verifyAuthenticatedMarksResponse } from '../src/flex/aut
 
 test('buildSessionExpiredEmail produces expected subject and actionable message text', () => {
   const email = buildSessionExpiredEmail(new Date('2026-09-25T17:00:00Z'));
-  assert.equal(email.subject, 'FLEX Watcher Alert - Session Expired');
-  assert.match(email.text, /Your FLEX session is no longer authenticated\./);
-  assert.match(email.text, /A new session cookie is required\./);
-  assert.match(email.text, /The saved marks snapshot remains unchanged\./);
+  assert.match(email.subject, /Login Required/);
+  assert.match(email.text, /authentication session was lost/);
+  assert.match(email.text, /Marks monitoring is paused/);
+  assert.match(email.text, /Marks monitoring is paused/);
 });
 
 test('HTTP 401 and 403 fail with LOGIN_REQUIRED', () => {
@@ -134,4 +134,16 @@ test('SessionAlertTracker logs without crashing when email is not configured', a
   assert.equal(result, false);
   assert.equal(tracker.isAlertSent(), false);
   assert.ok(logs.some(m => m.includes('Email alert disabled')));
+});
+
+test('auth state machine enters recovery once and recovers', async () => {
+  const { AuthState, AuthStateMachine } = await import('../src/auth-state.js');
+  const states = []; const machine = new AuthStateMachine({ log: message => states.push(message) });
+  assert.equal(machine.lose('login redirect'), true);
+  assert.equal(machine.lose('login redirect'), false);
+  assert.equal(machine.isWaiting(), true);
+  assert.equal(machine.recover(), true);
+  machine.authenticated();
+  assert.deepEqual(states, ['AUTH LOST | login redirect', 'RECOVERY MODE ENTERED | normal marks processing paused', 'AUTH RECOVERED']);
+  assert.equal(machine.state, AuthState.AUTHENTICATED);
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMarksEmail, buildTestEmail, loadEmailConfig, rawMessage } from '../src/email.js';
+import { buildMarksEmail, buildTestEmail, buildRecoveryEmail, buildSessionExpiredEmail, loadEmailConfig, rawMessage } from '../src/email.js';
 
 test('email config is disabled when no email settings exist', () => {
   assert.equal(loadEmailConfig({}), null);
@@ -34,7 +34,7 @@ test('new mark email includes only relevant student mark details', () => {
       assessmentNumber: 2, obtained: 8, total: 10, weightage: 2.5,
     },
   }, new Date('2026-09-25T16:00:00Z'));
-  assert.match(message.subject, /Data Structures Quiz 2 — 8\/10/);
+  assert.match(message.subject, /Data Structures Quiz 2 \u2014 8\/10/);
   assert.match(message.text, /Course: Data Structures/);
   assert.match(message.text, /New: 8\/10/);
   assert.doesNotMatch(message.text, /average|min|max/i);
@@ -49,7 +49,7 @@ test('changed mark email shows old and new values', () => {
       assessmentNumber: 1, obtained: 9, total: 10, weightage: 3,
     },
   });
-  assert.match(message.subject, /Linear Algebra Assignment 1 — 9\/10/);
+  assert.match(message.subject, /Linear Algebra Assignment 1 \u2014 9\/10/);
   assert.match(message.text, /Previous: 7\/12/);
   assert.match(message.text, /New: 9\/10/);
 });
@@ -93,4 +93,12 @@ test('header injection in configured addresses is rejected', () => {
     FLEX_SMTP_PASS: 'secret',
     FLEX_EMAIL_TO: 'me@example.com',
   }), /Invalid FLEX_SMTP_USER/);
+});
+
+test('auth recovery emails contain a private link and no secrets', () => {
+  const lost = buildSessionExpiredEmail(new Date('2026-09-28T13:00:00Z'), 'https://browser.tailnet.example');
+  assert.match(lost.subject, /Login Required/); assert.match(lost.html, /Re-authenticate FLEX/); assert.match(lost.html, /browser.tailnet.example/);
+  assert.doesNotMatch(lost.text, /password|cookie|session id/i);
+  const recovered = buildRecoveryEmail(new Date('2026-09-28T13:05:00Z'), 15000);
+  assert.match(recovered.subject, /Back Online/); assert.match(recovered.text, /resumed automatically/);
 });

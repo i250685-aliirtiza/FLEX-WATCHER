@@ -3,7 +3,8 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parseMarksHtml } from './flex/parser.js';
 import { normalizeCookieInput, verifyAuthenticatedMarksResponse, verifyAuthenticatedNavigationResponse } from './flex/auth.js';
-import { buildSessionExpiredEmail, buildTestEmail, loadEmailConfig, sendEmail } from './email.js';
+import { buildSessionExpiredEmail, buildRecoveryEmail, buildTestEmail, loadEmailConfig, sendEmail } from './email.js';
+import { AuthStateMachine } from './auth-state.js';
 import { deliverChanges } from './notifications.js';
 import { SessionAlertTracker } from './session-alert.js';
 import { diffMarks } from './marks.js';
@@ -23,6 +24,9 @@ const EMAIL_TEST = process.env.FLEX_EMAIL_TEST === '1';
 const RETRY_BASE_MS = Number(process.env.FLEX_RETRY_BASE_MS || POLL_MS);
 const RETRY_MAX_MS = Number(process.env.FLEX_RETRY_MAX_MS || Math.max(POLL_MS, 1800000));
 const LONG_RUN = process.env.FLEX_LONG_RUN === '1';
+const RECOVERY_URL = process.env.FLEX_RECOVERY_URL || '';
+const RECOVERY_CHECK_MS = Number(process.env.FLEX_RECOVERY_CHECK_MS || 15000);
+const AUTH_STATE = new AuthStateMachine({ log: msg => console.log(`[${stamp()}] ${msg}`) });
 const LONG_RUN_MS = Number(process.env.FLEX_LONG_RUN_HOURS || 8) * 60 * 60 * 1000;
 
 let EMAIL_CONFIG = null;
@@ -36,7 +40,7 @@ try {
 const SESSION_ALERT_TRACKER = new SessionAlertTracker({
   sendAlert: EMAIL_CONFIG
     ? async () => {
-        const message = buildSessionExpiredEmail();
+        const message = buildSessionExpiredEmail(new Date(), RECOVERY_URL);
 
         await sendEmail(EMAIL_CONFIG, message);
       }
@@ -226,6 +230,12 @@ async function poll() {
       `assessments=${stats.assessments} | released=${stats.released} | snapshot=${stats.hash}`
     );
 
+    if (AUTH_STATE.isWaiting()) {
+      AUTH_STATE.recover();
+      console.log(`[${stamp()}] MARKS MONITORING RESUMED`);
+      if (EMAIL_CONFIG) { try { await sendEmail(EMAIL_CONFIG, buildRecoveryEmail(new Date(), POLL_MS)); console.log(`[${stamp()}] RECOVERY EMAIL SENT`); } catch (error) { console.error(`[${stamp()}] RECOVERY EMAIL FAILED: ${error.message}`); } }
+    }
+    AUTH_STATE.authenticated();
     SESSION_ALERT_TRACKER.onPollSuccess();
     logLifetime();
 
@@ -256,6 +266,9 @@ async function poll() {
     });
   } catch (error) {
     console.error(`[${stamp()}] ${classifyFailure(error)} | code=${error?.code || 'LOCAL_ERROR'}${error?.status ? ` | HTTP ${error.status}` : ''} | last valid snapshot preserved`);
+    if (error?.code === 'LOGIN_REQUIRED') {
+      AUTH_STATE.lose(error.message || 'login page detected');
+    }
     if (error?.code === 'LOGIN_REQUIRED' && !lifetime.expiredAt) {
       lifetime.expiredAt = new Date().toISOString();
       console.error(`[${stamp()}] SESSION EXPIRED | login page or authentication rejection detected`);
@@ -291,8 +304,8 @@ async function watchLoop() {
         break;
       }
       if (stopping) break;
-      const delay = ok ? POLL_MS : retryDelay(failures, RETRY_BASE_MS, RETRY_MAX_MS);
-      if (!ok) console.log(`[${stamp()}] RETRY | in=${delay}ms | consecutiveFailures=${failures}`);
+      const delay = ok ? POLL_MS : (AUTH_STATE.isWaiting() ? RECOVERY_CHECK_MS : retryDelay(failures, RETRY_BASE_MS, RETRY_MAX_MS));
+      if (!ok) console.log(`[${stamp()}] ${AUTH_STATE.isWaiting() ? 'WAITING FOR MANUAL LOGIN' : 'RETRY'} | in=${delay}ms | consecutiveFailures=${failures}`);
       await new Promise(resolve => {
         const timer = setTimeout(resolve, Math.min(delay, Math.max(0, deadline - Date.now())));
         wake = () => { clearTimeout(timer); resolve(); };
