@@ -1,4 +1,4 @@
-ï»¿node_modules/
+node_modules/
 data/
 *.log
 .env
@@ -12,9 +12,3 @@ data/
 playwright-report/
 test-results/
 .auth/
-
-# Persistent Chromium state (never commit)
-chrome-profile/
-/var/lib/flex-marks-notifier/chrome-profile/
-
-node_modules/

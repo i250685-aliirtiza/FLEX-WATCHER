@@ -195,31 +195,6 @@ Mark notifications are sent one assessment per email, sequentially, with HTML an
 
 ## Manual authentication recovery
 
-When FLEX rejects an authenticated request, the watcher enters `WAITING_FOR_MANUAL_LOGIN`, pauses marks processing, and sends one `🔐 FLEX Watcher — Login Required` email. It continues a low-rate authentication check (`FLEX_RECOVERY_CHECK_MS`, default 15 seconds) without replacing the saved snapshot. When a valid `PrintAdmitCard -> StudentMarks` sequence succeeds, it logs `AUTH RECOVERED`, resumes the normal poll interval, and sends one `✅ FLEX Watcher Back Online` email. Network and HTTP server failures do not enter recovery mode.
+When FLEX authentication is genuinely lost, the watcher enters `WAITING_FOR_MANUAL_LOGIN`, pauses marks processing, sends one login-required email, and periodically rechecks the existing watcher session. After a valid `PrintAdmitCard -> StudentMarks` sequence succeeds, it logs recovery, resumes normal polling, and sends one back-online email. Network and transient FLEX failures remain separate.
 
-Set `FLEX_RECOVERY_URL` only to a private, authenticated browser endpoint, such as a Tailscale-only noVNC URL:
-
-```ini
-FLEX_RECOVERY_URL=https://browser.your-tailnet.ts.net/
-FLEX_RECOVERY_CHECK_MS=15000
-```
-
-The repository does not read Chromium’s encrypted cookie database or expose a public debugging port. To use a browser for manual login, run Chromium and noVNC on the VM under the `flex-watcher` account with a persistent profile such as `/var/lib/flex-marks-notifier/chrome-profile`, bind noVNC to the Tailscale interface or localhost, and require Tailscale authentication. Never place the profile, cookies, passwords, or Tailscale credentials in Git or in the email. The current supported watcher session remains the configured cookie jar; after a manual browser login, update that cookie through the existing protected environment-file procedure unless you deploy a separate, audited cookie-bridge.
-
-For a safe state-machine check without waiting for expiry, run the automated suite; it covers `AUTHENTICATED -> AUTH_LOST -> WAITING_FOR_MANUAL_LOGIN -> AUTH_RECOVERED`.
-
-### VM recovery checklist
-
-Install the private networking and browser components according to their current Ubuntu documentation, then keep them under systemd. Do not open VNC, noVNC, Chrome DevTools, or the recovery endpoint in an Oracle security list. A typical private setup is:
-
-```bash
-sudo apt update
-sudo apt install -y chromium-browser xvfb
-# Install noVNC/websockify using your distro's current package or pinned release.
-sudo systemctl enable --now tailscaled
-sudo tailscale up
-# Configure Chromium with --user-data-dir=/var/lib/flex-marks-notifier/chrome-profile
-# Bind noVNC to the Tailscale address only and protect it with Tailscale ACLs.
-```
-
-The watcher itself survives SSH disconnects and VM reboots through `flex-marks-notifier.service`; the browser/noVNC process must likewise use a dedicated systemd unit and the same `flex-watcher` user.
+`FLEX_RECOVERY_URL` is an optional configurable login/recovery link whose destination is decided by the operator. `FLEX_RECOVERY_CHECK_MS` controls the recovery check interval and defaults to 15000 milliseconds.

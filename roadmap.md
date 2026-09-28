@@ -147,3 +147,9 @@ Success criterion: a valid FLEX session remains authenticated well beyond the pr
 
 
 
+
+## Cookie-based baseline verification
+
+- Preserved application source and tests exactly as at e088162; df66d1d recovery logic remains unchanged.
+- Removed browser deployment guidance and profile ignore entries; recovery URL is an operator-defined link. Historical records of abandoned browser experiments remain.
+- Verified all 77 tests pass. No replacement authentication architecture introduced.
