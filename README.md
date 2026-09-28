@@ -101,7 +101,7 @@ Replace `20263` with the semester ID you want to watch. Keep the quotation marks
 ```bash
 sudo chown root:root /etc/flex-marks-notifier.env
 sudo chmod 600 /etc/flex-marks-notifier.env
-sudo grep -E '^(FLEX_SEMESTER_ID|FLEX_POLL_MS|FLEX_REQUEST_TIMEOUT_MS)=' /etc/flex-marks-notifier.env
+sudo grep -E '^(FLEX_SEMESTER_ID|MARKS_POLL_MS|FLEX_REQUEST_TIMEOUT_MS)=' /etc/flex-marks-notifier.env
 ```
 
 ### Optional email notifications
