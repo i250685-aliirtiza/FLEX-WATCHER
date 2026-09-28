@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parseMarksHtml } from './flex/parser.js';
-import { normalizeCookieInput, verifyAuthenticatedMarksResponse } from './flex/auth.js';
-import { buildMarksEmail, buildSessionExpiredEmail, buildTestEmail, loadEmailConfig, sendEmail } from './email.js';
+import { normalizeCookieInput, verifyAuthenticatedMarksResponse, verifyAuthenticatedNavigationResponse } from './flex/auth.js';
+import { buildSessionExpiredEmail, buildTestEmail, loadEmailConfig, sendEmail } from './email.js';
+import { deliverChanges } from './notifications.js';
 import { SessionAlertTracker } from './session-alert.js';
 import { diffMarks } from './marks.js';
 import { validateSnapshot } from './snapshot.js';
@@ -13,7 +14,7 @@ import { retryDelay, classifyFailure } from './retry.js';
 
 const COOKIE_INPUT = process.env.FLEX_COOKIE || process.env.FLEX_SESSION_ID;
 const SEMESTER_ID = process.env.FLEX_SEMESTER_ID || '20263';
-const POLL_MS = Number(process.env.FLEX_POLL_MS || 300000);
+const POLL_MS = Number(process.env.MARKS_POLL_MS || process.env.FLEX_POLL_MS || 15000);
 const REQUEST_TIMEOUT_MS = Number(process.env.FLEX_REQUEST_TIMEOUT_MS || 30000);
 const SNAPSHOT_FILE = process.env.FLEX_SNAPSHOT_FILE || './data/marks-snapshot.json';
 const RUN_ONCE = process.env.FLEX_RUN_ONCE === '1';
@@ -55,11 +56,11 @@ if (!SELF_TEST && !EMAIL_TEST) {
 }
 
 if (!Number.isFinite(POLL_MS) || POLL_MS < 10000) {
-  console.error('FLEX_POLL_MS must be a number >= 10000.');
+  console.error('MARKS_POLL_MS must be a number >= 10000.');
   process.exit(1);
 }
 
-for (const [name, value] of Object.entries({ FLEX_POLL_MS: POLL_MS, FLEX_REQUEST_TIMEOUT_MS: REQUEST_TIMEOUT_MS, FLEX_RETRY_BASE_MS: RETRY_BASE_MS, FLEX_RETRY_MAX_MS: RETRY_MAX_MS })) {
+for (const [name, value] of Object.entries({ MARKS_POLL_MS: POLL_MS, FLEX_REQUEST_TIMEOUT_MS: REQUEST_TIMEOUT_MS, FLEX_RETRY_BASE_MS: RETRY_BASE_MS, FLEX_RETRY_MAX_MS: RETRY_MAX_MS })) {
   if (!Number.isSafeInteger(value) || value < (name === 'FLEX_REQUEST_TIMEOUT_MS' ? 1000 : 10000) || value > 2147483647) {
     console.error(`${name} must be an integer within the supported timer range.`);
     process.exit(1);
@@ -167,32 +168,20 @@ async function runEmailTest() {
   );
 }
 
-async function notifyChanges(changes) {
-  if (!EMAIL_CONFIG) {
-    console.log(`[${stamp()}] EMAIL DISABLED | mark change remains terminal-only.`);
-    return true;
-  }
-
-  try {
-    const result = await sendEmail(EMAIL_CONFIG, buildMarksEmail(changes));
-    console.log(`[${stamp()}] EMAIL SENT | recipients=${result.recipients}`);
-    return true;
-  } catch (error) {
-    console.error(`[${stamp()}] NOTIFICATION FAILED: ${error.message}`);
-    console.error(`[${stamp()}] Snapshot was NOT advanced; the same mark change will be retried on the next poll.`);
-    return false;
-  }
-}
-
 async function request(path) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(`https://flexstudent.nu.edu.pk${path}`, { headers: { Cookie: SESSION.header(), 'User-Agent': 'Mozilla/5.0', Accept: 'text/html,application/xhtml+xml' }, redirect: 'follow', signal: controller.signal });
+    const res = await fetch(`https://flexstudent.nu.edu.pk${path}`, { headers: { Cookie: SESSION.header(), 'User-Agent': 'Mozilla/5.0', Accept: 'text/html,application/xhtml+xml' }, redirect: 'manual', signal: controller.signal });
     const setCookie = SESSION.acceptSetCookie(res.headers);
+    if (res.status >= 300 && res.status < 400) {
+      const location = new URL(res.headers.get('location') || '/', res.url);
+      throw Object.assign(new Error('FLEX redirected the authenticated request.'), { code: /login/i.test(location.pathname) ? 'LOGIN_REQUIRED' : 'ROUTING_FAILED' });
+    }
     const html = await res.text();
     return { res, html, setCookie };
-  } catch {
+  } catch (error) {
+    if (['LOGIN_REQUIRED', 'ROUTING_FAILED'].includes(error?.code)) throw error;
     // Do not log remote text, URLs or fetch causes: they can contain secrets.
     throw Object.assign(new Error('Network request failed or timed out.'), { code: 'NETWORK_FAILURE' });
   } finally { clearTimeout(timeout); }
@@ -202,11 +191,24 @@ if (LONG_RUN && (!Number.isFinite(LONG_RUN_MS) || LONG_RUN_MS < 60 * 60 * 1000))
   process.exit(1);
 }
 
+const lifetime = { watcherStartedAt: new Date().toISOString(), firstAuthenticatedAt: null, lastNavigationAt: null, lastMarksAt: null, expiredAt: null };
+function logLifetime() {
+  const observedMs = lifetime.firstAuthenticatedAt
+    ? Math.max(0, Math.max(Date.parse(lifetime.lastMarksAt || lifetime.firstAuthenticatedAt), Date.parse(lifetime.lastNavigationAt || lifetime.firstAuthenticatedAt)) - Date.parse(lifetime.firstAuthenticatedAt)) : 0;
+  console.log(`[${stamp()}] SESSION LIFETIME | ${JSON.stringify({ ...lifetime, observedAuthenticatedMs: observedMs })}`);
+}
+
 async function fetchVerifiedMarks() {
+  const navigation = await request('/Student/PrintAdmitCard?semid=20263');
+  verifyAuthenticatedNavigationResponse({ responseUrl: navigation.res.url, status: navigation.res.status, contentType: navigation.res.headers.get('content-type') || '', html: navigation.html });
+  lifetime.lastNavigationAt = new Date().toISOString();
+  lifetime.firstAuthenticatedAt ||= lifetime.lastNavigationAt;
+  console.log(`[${stamp()}] NAVIGATION | PrintAdmitCard OK`);
   const { res, html, setCookie } = await request(`/Student/StudentMarks?semid=${encodeURIComponent(SEMESTER_ID)}`);
   verifyAuthenticatedMarksResponse({ responseUrl: res.url, status: res.status, contentType: res.headers.get('content-type') || '', html });
   const current = parseMarksHtml(html);
   if (String(current.semester.id) !== String(SEMESTER_ID)) throw Object.assign(new Error('Requested semester does not match the marks response.'), { code: 'SEMESTER_MISMATCH' });
+  lifetime.lastMarksAt = new Date().toISOString();
   return { current, status: res.status, setCookie };
 }
 
@@ -225,6 +227,7 @@ async function poll() {
     );
 
     SESSION_ALERT_TRACKER.onPollSuccess();
+    logLifetime();
 
     if (!previous) {
       await saveSnapshot(current);
@@ -234,7 +237,7 @@ async function poll() {
 
     const decision = decidePoll(previous, current);
     if (decision.type === 'unchanged') {
-      console.log(`[${stamp()}] WATCHED | session still authenticated | no mark changes.`);
+      console.log(`[${stamp()}] MARKS CHECK | session=valid | no changes | no mark changes.`);
       await saveSnapshot(current);
       return true;
     }
@@ -244,10 +247,20 @@ async function poll() {
     for (const change of changes) printChange(change);
     console.log('');
 
-    if (!await notifyChanges(changes)) return false;
-    await saveSnapshot(current);
+    return await deliverChanges({ previous, current, changes, save: saveSnapshot,
+      send: EMAIL_CONFIG ? async message => {
+        const result = await sendEmail(EMAIL_CONFIG, message);
+        console.log(`[${stamp()}] EMAIL SENT | recipients=${result.recipients}`);
+      } : async () => { console.log(`[${stamp()}] EMAIL DISABLED | mark change remains terminal-only.`); },
+      logError: message => console.error(`[${stamp()}] ${message}`),
+    });
   } catch (error) {
     console.error(`[${stamp()}] ${classifyFailure(error)} | code=${error?.code || 'LOCAL_ERROR'}${error?.status ? ` | HTTP ${error.status}` : ''} | last valid snapshot preserved`);
+    if (error?.code === 'LOGIN_REQUIRED' && !lifetime.expiredAt) {
+      lifetime.expiredAt = new Date().toISOString();
+      console.error(`[${stamp()}] SESSION EXPIRED | login page or authentication rejection detected`);
+      logLifetime();
+    }
     await SESSION_ALERT_TRACKER.onPollFailure(error);
     return false;
   }
@@ -266,7 +279,7 @@ async function watchLoop() {
   // Install before the initial request, including in one-shot mode.
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
-  console.log(`[${stamp()}] STARTUP | poll=${POLL_MS}ms | timeout=${REQUEST_TIMEOUT_MS}ms | protected marks route is heartbeat`);
+  console.log(`[${stamp()}] STARTUP | poll=${POLL_MS}ms | timeout=${REQUEST_TIMEOUT_MS}ms | PrintAdmitCard -> Marks -> process -> wait`);
   if (LONG_RUN) console.log(`[${stamp()}] LONG SESSION TEST | duration=${LONG_RUN_MS / 3600000}h`);
   let failures = 0;
   try {
@@ -289,6 +302,7 @@ async function watchLoop() {
   } finally {
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
+    logLifetime();
     console.log(`[${stamp()}] SHUTDOWN COMPLETE`);
   }
 }

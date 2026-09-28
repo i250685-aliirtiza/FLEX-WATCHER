@@ -27,13 +27,13 @@ export function normalizeCookieInput(raw) {
  * Proves that this response is the authenticated marks page, not merely HTTP 200.
  * The parser performs the second half of the proof by validating the marks DOM.
  */
-export function verifyAuthenticatedMarksResponse({ responseUrl, status, contentType = '', html }) {
+export function verifyAuthenticatedMarksResponse({ responseUrl, status, contentType = '', html, expectedPath = '/student/studentmarks' }) {
   // HTTP failures take precedence over missing/malformed server error bodies.
   if (Number.isInteger(status) && status >= 500) {
     throw Object.assign(new FlexAuthError(`FLEX returned HTTP ${status}.`, 'HTTP_ERROR'), { status });
   }
   const lower = typeof html === 'string' ? html.toLowerCase() : '';
-  const challengeSignals = ['cf-chl-', 'challenge-platform', 'verify you are human', 'checking your browser', 'just a moment...'];
+  const challengeSignals = ['cf-chl-', 'challenge-platform', 'verify you are human', 'checking your browser', 'just a moment...', 'cf-turnstile', 'challenges.cloudflare.com/turnstile'];
   if (challengeSignals.some(signal => lower.includes(signal))) {
     fail('Cloudflare/human verification page received instead of FLEX marks.', 'HUMAN_VERIFICATION_REQUIRED');
   }
@@ -55,7 +55,7 @@ export function verifyAuthenticatedMarksResponse({ responseUrl, status, contentT
   }
 
   const path = final.pathname.replace(/\/+$/, '').toLowerCase();
-  if (path !== '/student/studentmarks') {
+  if (path !== expectedPath) {
     if (path.includes('/login') || path.includes('/account/login')) {
       fail('FLEX session is no longer authenticated; request landed on the login page.', 'LOGIN_REQUIRED');
     }
@@ -81,4 +81,12 @@ export function verifyAuthenticatedMarksResponse({ responseUrl, status, contentT
     origin: final.origin,
     path: final.pathname,
   };
+}
+
+export function verifyAuthenticatedNavigationResponse(response) {
+  verifyAuthenticatedMarksResponse({ ...response, expectedPath: '/student/printadmitcard' });
+  // Require positive authenticated-page evidence, not just the absence of a login form.
+  if (!/<(?:a|form)\b[^>]*(?:href|action)\s*=\s*["'][^"']*\/(?:[^"']*\/)?(?:logout|signout)\b/i.test(response.html)) {
+    fail('Admit-card response lacks authenticated logout navigation.', 'INVALID_HTML');
+  }
 }

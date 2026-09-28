@@ -11,7 +11,7 @@ import { retryDelay, classifyFailure } from '../src/retry.js';
 const fixture = await readFile(new URL('./fixtures/flex-structure.html', import.meta.url), 'utf8');
 const baseline = parseMarksHtml(fixture);
 
-async function run({ response = {}, network = false, previous = baseline, signal = null } = {}) {
+async function run({ response = {}, network = false, previous = baseline, signal = null, navigationResponse = {}, loop = false } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'flex-runtime-'));
   try {
     const snapshot = join(dir, 'snapshot.json');
@@ -19,10 +19,23 @@ async function run({ response = {}, network = false, previous = baseline, signal
     await writeFile(snapshot, before);
     const preload = join(dir, 'mock.mjs');
     await writeFile(preload, `
-      let calls = 0;
-      globalThis.fetch = async url => {
+      let calls = 0, navigationCalls = 0, active = 0;
+      const realTimeout = globalThis.setTimeout;
+      ${loop ? "globalThis.setTimeout = (fn, delay, ...args) => realTimeout(fn, delay === 15000 ? 5 : delay, ...args);" : ''}
+      globalThis.fetch = async (url, options) => {
+        if (++active !== 1) throw new Error('Overlapping requests');
+        if (options.headers.Cookie !== 'ASP.NET_SessionId=test-only-cookie') throw new Error('Session changed');
+        await new Promise(resolve => realTimeout(resolve, 20));
+        active--;
+        if (url === 'https://flexstudent.nu.edu.pk/Student/PrintAdmitCard?semid=20263') {
+          if (++navigationCalls !== calls + 1) throw new Error('Wrong navigation sequence');
+          return { url, status: 200, headers: new Headers({'content-type': 'text/html'}), text: async () => '<html><a href="/Login/Logout">Logout</a></html>', ...${JSON.stringify(navigationResponse)},
+            ${navigationResponse.html !== undefined ? `text: async () => ${JSON.stringify(navigationResponse.html)},` : ''}
+          };
+        }
         if (!url.includes('/Student/StudentMarks?')) throw new Error('Unexpected route');
-        if (++calls > 1) throw new Error('Overlapping or extra request');
+        if (++calls !== navigationCalls) throw new Error('Marks requested before navigation');
+        ${loop ? "if (calls === 2) process.emit('SIGTERM');" : ''}
         ${signal === 'first' ? "process.emit('SIGTERM');" : ''}
         ${network ? "throw new TypeError('fetch failed');" : ''}
         return { url: 'https://flexstudent.nu.edu.pk/Student/StudentMarks', status: 200,
@@ -33,8 +46,8 @@ async function run({ response = {}, network = false, previous = baseline, signal
       };
       ${signal === 'idle' ? "setTimeout(() => process.emit('SIGINT'), 250);" : ''}
     `);
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('FLEX_')));
-    Object.assign(env, { FLEX_COOKIE: 'test-only-cookie', FLEX_SNAPSHOT_FILE: snapshot, FLEX_RUN_ONCE: signal ? '0' : '1' });
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('FLEX_') && key !== 'MARKS_POLL_MS'));
+    Object.assign(env, { FLEX_COOKIE: 'test-only-cookie', FLEX_SNAPSHOT_FILE: snapshot, FLEX_RUN_ONCE: signal || loop ? '0' : '1' });
     const result = await new Promise((resolveResult, reject) => {
       const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, resolve('src/notifier.js')], { env });
       let output = '';
@@ -96,4 +109,28 @@ test('backoff increases, caps, and resets with failure counter', () => {
   assert.deepEqual([1, 2, 3, 4, 100, 1].map(n => retryDelay(n, 300000, 1800000)),
     [300000, 600000, 1200000, 1800000, 1800000, 300000]);
   assert.equal(classifyFailure({ code: 'EACCES' }), 'LOCAL WATCH FAILURE');
+});
+
+test('navigation failure never parses marks or replaces snapshot', async () => {
+  for (const navigationResponse of [
+    { url: 'https://flexstudent.nu.edu.pk/Login', html: '<input type="password">' },
+    { html: '<input type="password">' },
+    { html: '<div class="cf-turnstile"></div>' },
+    { html: '<html>Maintenance</html>' },
+    { status: 401 },
+  ]) {
+    const result = await run({ navigationResponse });
+    assert.equal(result.code, 1);
+    assert.equal(result.before, result.after);
+    assert.doesNotMatch(result.output, /NAVIGATION.*OK|AUTH VERIFIED|MARK CHANGE DETECTED|EMAIL SENT/);
+  }
+});
+
+test('two delayed cycles use the same cookie and navigation order without overlap', async () => {
+  const result = await run({ loop: true });
+  assert.equal(result.code, 0, result.output);
+  assert.equal((result.output.match(/NAVIGATION \| PrintAdmitCard OK/g) || []).length, 2);
+  assert.equal((result.output.match(/AUTH VERIFIED/g) || []).length, 2);
+  assert.match(result.output, /poll=15000ms/);
+  assert.match(result.output, /observedAuthenticatedMs/);
 });

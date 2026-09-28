@@ -30,7 +30,7 @@ test('new released assessment is detected exactly once', () => {
   assert.equal(changes.length, 1);
   assert.equal(changes[0].type, 'new');
   assert.equal(changes[0].now.assessmentNumber, 2);
-  assert.match(buildMarksEmail(changes).text, /CS2001 - Programming[\s\S]*Quiz 2[\s\S]*New: 9\/10/);
+  assert.match(buildMarksEmail(changes[0]).text, /Course: Programming[\s\S]*Quiz 2[\s\S]*New: 9\/10/);
   assert.deepEqual(diffMarks(next, next), []);
 });
 
@@ -42,9 +42,9 @@ test('existing obtained mark changes with old and new values in notification', (
   assert.equal(changes[0].old.obtained, 7);
   assert.equal(changes[0].now.obtained, 9);
   assert.equal(changes[0].now.total, 12);
-  const email = buildMarksEmail(changes);
-  assert.match(email.subject, /Mark Updated/);
-  assert.match(email.text, /Old: 7\/12/);
+  const email = buildMarksEmail(changes[0]);
+  assert.match(email.subject, /Programming Quiz 1 — 9\/12/);
+  assert.match(email.text, /Previous: 7\/10/);
   assert.match(email.text, /New: 9\/12/);
   assert.deepEqual(diffMarks(next, next), []);
 });
@@ -55,7 +55,7 @@ test('previously unreleased assessment becomes released', () => {
   const changes = diffMarks(old, next);
   assert.equal(changes.length, 1);
   assert.equal(changes[0].type, 'released');
-  assert.match(buildMarksEmail(changes).text, /New: 8\/10/);
+  assert.match(buildMarksEmail(changes[0]).text, /New: 8\/10/);
 });
 
 test('removed assessments do not create false changes, but reappearance is detected as new', () => {

@@ -2,7 +2,7 @@
 
 FLEX Marks Notifier watches your authenticated FAST FLEX marks page and emails you when a mark is released or changed. It runs as a small always-on Node.js service on an Oracle Cloud Ubuntu VM.
 
-The watcher does not log in to FLEX, store your FLEX password, solve CAPTCHAs, or bypass Turnstile. You first obtain a valid FLEX session cookie in your normal browser, then provide that cookie to the service. The protected marks request is the authentication and health check.
+The watcher does not log in to FLEX, store your FLEX password, solve CAPTCHAs, or bypass Turnstile. You first obtain a valid FLEX session cookie in your normal browser, then provide that cookie to the service. Each cycle uses the same cookie session in this order: `PrintAdmitCard?semid=20263` navigation, authenticated `Student/StudentMarks?semid=20263`, comparison, one email per changed assessment, then a 15-second wait. Both responses are checked for login/challenge/redirect failures before parsing.
 
 ## What you need
 
@@ -90,7 +90,7 @@ Set at least these values:
 FLEX_COOKIE="ASP.NET_SessionId=PASTE_YOUR_CURRENT_COOKIE"
 FLEX_SEMESTER_ID=20263
 FLEX_SNAPSHOT_FILE=/var/lib/flex-marks-notifier/marks-snapshot.json
-FLEX_POLL_MS=300000
+MARKS_POLL_MS=15000
 FLEX_REQUEST_TIMEOUT_MS=30000
 FLEX_RETRY_BASE_MS=300000
 FLEX_RETRY_MAX_MS=1800000
@@ -191,4 +191,4 @@ For a one-shot local check, set `FLEX_RUN_ONCE=1` and provide a valid cookie. Do
 
 ## Scope and live validation
 
-The watcher preserves the last valid marks snapshot on network, FLEX, parser, and notification failures; avoids overlapping polling; restarts after crashes; and handles SIGINT/SIGTERM. Remaining validation requires a real deployment: an overnight Oracle soak test (including approximately 03:00–03:15), and a real mark-change notification when a professor uploads or changes marks.
+Mark notifications are sent one assessment per email, sequentially, with HTML and plain-text alternatives. The watcher preserves the last valid marks snapshot on network, FLEX, parser, and notification failures; avoids overlapping polling; restarts after crashes; and handles SIGINT/SIGTERM. Remaining validation requires a real deployment: an overnight Oracle soak test (including approximately 03:00–03:15), and a real mark-change notification when a professor uploads or changes marks.

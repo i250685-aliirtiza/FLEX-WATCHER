@@ -1,4 +1,5 @@
 import tls from 'node:tls';
+import { randomUUID } from 'node:crypto';
 
 const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 
@@ -54,41 +55,28 @@ export function loadEmailConfig(env = process.env) {
   return { host, port, user, pass, from, to };
 }
 
-function changeTitle(change) {
+const present = value => value !== null && value !== undefined && String(value).trim() !== '';
+const finite = value => typeof value === 'number' && Number.isFinite(value);
+const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const score = a => finite(a?.obtained) ? `${a.obtained}${finite(a.total) ? `/${a.total}` : ''}` : 'Not available';
+
+export function buildMarksEmail(change, detectedAt = new Date()) {
+  if (!change?.now || Array.isArray(change)) throw new Error('buildMarksEmail requires exactly one mark change.');
   const a = change.now;
-  return `${a.courseCode} ${a.category} ${a.assessmentNumber}`;
-}
-
-export function buildMarksEmail(changes, detectedAt = new Date()) {
-  if (!Array.isArray(changes) || changes.length === 0) throw new Error('buildMarksEmail requires at least one mark change.');
-
-  let subject;
-  if (changes.length === 1) {
-    subject = changes[0].type === 'changed'
-      ? `FLEX - Mark Updated: ${changeTitle(changes[0])}`
-      : `FLEX - New Mark: ${changeTitle(changes[0])}`;
-  } else {
-    subject = `FLEX - ${changes.length} Mark Updates`;
-  }
-
-  const lines = [
-    'FLEX Marks Watcher',
-    `Detected: ${detectedAt.toLocaleString()}`,
-    '',
-  ];
-
-  for (const change of changes) {
-    const a = change.now;
-    lines.push(change.type === 'changed' ? '[MARK CHANGED]' : '[NEW MARK]');
-    lines.push(`${a.courseCode} - ${a.courseName}`);
-    lines.push(`${a.category} ${a.assessmentNumber}`);
-    if (change.type === 'changed') lines.push(`Old: ${change.old.obtained}/${a.total}`);
-    lines.push(`New: ${a.obtained}/${a.total}`);
-    if (a.weightage !== null && a.weightage !== undefined) lines.push(`Weightage: ${a.weightage}`);
-    lines.push('');
-  }
-
-  return { subject: cleanHeader(subject, 'email subject'), text: lines.join('\n').trimEnd() + '\n' };
+  const course = a.courseName || a.courseCode || 'Course';
+  const assessment = a.assessmentTitle || [a.category, a.assessmentNumber].filter(present).join(' ') || 'Assessment';
+  const heading = change.type === 'changed' ? 'Marks Updated' : 'New Marks Posted';
+  const percentage = finite(a.obtained) && finite(a.total) && a.total > 0 && Number.isFinite(a.obtained / a.total * 100)
+    ? `${Number((a.obtained / a.total * 100).toFixed(2))}%` : null;
+  const detected = detectedAt.toLocaleString('en-GB', { timeZone: 'Asia/Karachi', day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) + ' PKT';
+  const fields = [['Course', course], ['Course code', a.courseCode], ['Assessment', assessment],
+    ['Marks Obtained', finite(a.obtained) ? a.obtained : null], ['Total Marks', finite(a.total) ? a.total : null],
+    ['Percentage', percentage], ['Previous', change.type === 'changed' && finite(change.old?.obtained) ? score(change.old) : null],
+    ['New', score(a)], ['Weightage', finite(a.weightage) ? a.weightage : null], ['Detected', detected]].filter(([, value]) => present(value));
+  const text = ['FLEX Marks Update', heading, '', ...fields.map(([key, value]) => `${key}: ${value}`)].join('\n') + '\n';
+  const rows = fields.map(([key, value]) => `<tr><td style="padding:10px 0;border-bottom:1px solid #edf0f3;color:#64748b;width:38%;vertical-align:top">${escapeHtml(key)}</td><td style="padding:10px 0 10px 12px;border-bottom:1px solid #edf0f3;word-break:break-word">${escapeHtml(value)}</td></tr>`).join('');
+  const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><meta charset="utf-8"></head><body style="margin:0;background:#f3f5f8;color:#172033;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:24px 12px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border:1px solid #e2e8f0;border-radius:12px"><tr><td style="padding:28px 24px"><p style="margin:0 0 20px;font-size:12px;letter-spacing:2px;color:#64748b">FLEX MARKS UPDATE</p><p style="margin:0 0 12px;color:#2563eb;font-size:13px">${escapeHtml(heading)}</p><h1 style="margin:0 0 8px;font-size:24px;word-break:break-word">${escapeHtml(course)}</h1><p style="margin:0;font-size:18px;color:#64748b">${escapeHtml(assessment)}</p><div style="margin:24px 0;padding:24px 12px;background:#f8fafc;text-align:center;border-radius:8px"><div style="font-size:38px;font-weight:bold">${escapeHtml(score(a))}</div>${percentage ? `<p style="margin:8px 0 0;color:#2563eb;font-size:20px">${escapeHtml(percentage)}</p>` : ''}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:14px;line-height:1.5">${rows}</table></td></tr></table></td></tr></table></body></html>`;
+  return { subject: cleanHeader(`${course} ${assessment} — ${score(a)}`, 'email subject'), text, html };
 }
 
 export function buildTestEmail(now = new Date()) {
@@ -194,20 +182,15 @@ function dotStuff(text) {
   return text.replace(/\r?\n/g, '\r\n').replace(/^\./gm, '..');
 }
 
-function rawMessage(config, message) {
+export function rawMessage(config, message) {
   const subject = cleanHeader(message.subject, 'email subject');
-  const text = String(message.text ?? '');
-  return [
-    `From: ${config.from}`,
-    `To: ${config.to.join(', ')}`,
-    `Subject: ${subject}`,
-    `Date: ${new Date().toUTCString()}`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: 8bit',
-    '',
-    text,
-  ].join('\r\n');
+  const encodedSubject = [...subject.matchAll(/[\s\S]{1,18}/gu)].map(m => `=?UTF-8?B?${Buffer.from(m[0]).toString('base64')}?=`).join('\r\n ');
+  const boundary = `flex-${randomUUID()}`;
+  const part = (type, value) => [`Content-Type: ${type}; charset=UTF-8`, 'Content-Transfer-Encoding: base64', '', Buffer.from(String(value ?? '')).toString('base64').match(/.{1,76}/g)?.join('\r\n') || ''].join('\r\n');
+  const body = message.html
+    ? [`Content-Type: multipart/alternative; boundary="${boundary}"`, '', `--${boundary}`, part('text/plain', message.text), `--${boundary}`, part('text/html', message.html), `--${boundary}--`].join('\r\n')
+    : part('text/plain', message.text);
+  return [`From: ${config.from}`, `To: ${config.to.join(', ')}`, `Subject: ${encodedSubject}`, `Date: ${new Date().toUTCString()}`, 'MIME-Version: 1.0', body].join('\r\n');
 }
 
 async function openTls(config, timeoutMs) {

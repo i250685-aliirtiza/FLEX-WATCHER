@@ -123,7 +123,8 @@ Success criterion: a valid FLEX session remains authenticated well beyond the pr
 - [x] Inspected repository files, source, configuration, tests, fixture, README, Git status, and current branch.
 - [x] Created this root-level roadmap from repository evidence.
 - [x] Recorded the automated-test verification blocker without claiming tests passed.
-- [x] Completed the live FLEX verification task using the user-supplied session cookie without persisting credentials or repository state.\n- [ ] No implementation task was executed in this session.
+- [x] Completed the live FLEX verification task using the user-supplied session cookie without persisting credentials or repository state.\n- [x] Implemented the 15-second PrintAdmitCard -> StudentMarks navigation experiment, per-assessment sequential HTML notifications, checkpointed delivery, and targeted tests (75 passing).
+- [ ] Validate the admit-card authenticated-page marker and session lifetime with a real Oracle VM cookie.
 
 
 

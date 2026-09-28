@@ -1,6 +1,6 @@
 param(
     [ValidateRange(10, 86400)]
-    [int]$Seconds = 300,
+    [int]$Seconds = 15,
 
     [string]$Semester = "20263",
 
@@ -37,7 +37,7 @@ if ([string]::IsNullOrWhiteSpace($cookie)) {
 
 $env:FLEX_COOKIE = $cookie
 $env:FLEX_SEMESTER_ID = $Semester
-$env:FLEX_POLL_MS = ([int64]$Seconds * 1000).ToString()
+$env:MARKS_POLL_MS = ([int64]$Seconds * 1000).ToString()
 
 if ($Email) {
     if ([string]::IsNullOrWhiteSpace($SmtpUser)) {
@@ -67,7 +67,7 @@ try {
 finally {
     Remove-Item Env:FLEX_COOKIE -ErrorAction SilentlyContinue
     Remove-Item Env:FLEX_SEMESTER_ID -ErrorAction SilentlyContinue
-    Remove-Item Env:FLEX_POLL_MS -ErrorAction SilentlyContinue
+    Remove-Item Env:MARKS_POLL_MS -ErrorAction SilentlyContinue
 
     if ($Email) {
         Remove-Item Env:FLEX_SMTP_USER -ErrorAction SilentlyContinue

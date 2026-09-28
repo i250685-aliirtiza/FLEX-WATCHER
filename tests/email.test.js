@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMarksEmail, buildTestEmail, loadEmailConfig } from '../src/email.js';
+import { buildMarksEmail, buildTestEmail, loadEmailConfig, rawMessage } from '../src/email.js';
 
 test('email config is disabled when no email settings exist', () => {
   assert.equal(loadEmailConfig({}), null);
@@ -27,42 +27,58 @@ test('gmail defaults use implicit TLS port and normalize app-password spaces', (
 });
 
 test('new mark email includes only relevant student mark details', () => {
-  const message = buildMarksEmail([{
+  const message = buildMarksEmail({
     type: 'released',
     now: {
       courseCode: 'CS2001', courseName: 'Data Structures', category: 'Quiz',
       assessmentNumber: 2, obtained: 8, total: 10, weightage: 2.5,
     },
-  }], new Date('2026-09-25T16:00:00Z'));
-  assert.match(message.subject, /New Mark: CS2001 Quiz 2/);
-  assert.match(message.text, /CS2001 - Data Structures/);
+  }, new Date('2026-09-25T16:00:00Z'));
+  assert.match(message.subject, /Data Structures Quiz 2 — 8\/10/);
+  assert.match(message.text, /Course: Data Structures/);
   assert.match(message.text, /New: 8\/10/);
   assert.doesNotMatch(message.text, /average|min|max/i);
 });
 
 test('changed mark email shows old and new values', () => {
-  const message = buildMarksEmail([{
+  const message = buildMarksEmail({
     type: 'changed',
-    old: { obtained: 7 },
+    old: { obtained: 7, total: 12 },
     now: {
       courseCode: 'MT1004', courseName: 'Linear Algebra', category: 'Assignment',
       assessmentNumber: 1, obtained: 9, total: 10, weightage: 3,
     },
-  }]);
-  assert.match(message.subject, /Mark Updated/);
-  assert.match(message.text, /Old: 7\/10/);
+  });
+  assert.match(message.subject, /Linear Algebra Assignment 1 — 9\/10/);
+  assert.match(message.text, /Previous: 7\/12/);
   assert.match(message.text, /New: 9\/10/);
 });
 
-test('multiple changes are batched into one email', () => {
-  const sample = n => ({
-    type: 'new',
-    now: { courseCode: `CS${n}`, courseName: 'Course', category: 'Quiz', assessmentNumber: 1, obtained: n, total: 10, weightage: 1 },
-  });
-  const message = buildMarksEmail([sample(1), sample(2)]);
-  assert.equal(message.subject, 'FLEX - 2 Mark Updates');
-  assert.match(message.text, /CS1/);
-  assert.match(message.text, /CS2/);
+test('batch input is rejected', () => {
+  assert.throws(() => buildMarksEmail([{ now: {} }, { now: {} }]), /exactly one/);
+});
+
+test('HTML escapes scraped values, calculates decimals, and includes text alternative', () => {
+  const message = buildMarksEmail({ type: 'new', now: { courseName: '<script>&"', category: "Quiz's", assessmentNumber: 1, obtained: 9.5, total: 10 } });
+  assert.match(message.text, /95%/);
+  assert.match(message.html, /95%/);
+  assert.match(message.html, /&lt;script&gt;&amp;&quot;/);
+  assert.match(message.html, /Quiz&#39;s/);
+  assert.doesNotMatch(message.html, /<script>/);
+  const raw = rawMessage({ from: 'a@example.com', to: ['b@example.com'] }, message);
+  assert.match(raw, /multipart\/alternative/);
+  assert.match(raw, /text\/plain/);
+  assert.match(raw, /text\/html/);
+  assert.ok(raw.includes(Buffer.from(message.text).toString('base64').slice(0, 60)));
+});
+
+test('missing, zero, and invalid totals omit percentage without fake values', () => {
+  for (const total of [undefined, null, 0, NaN, Infinity]) {
+    const message = buildMarksEmail({ type: 'new', now: { courseName: 'Course', category: 'Quiz', obtained: 9, total } });
+    assert.doesNotMatch(message.text, /Percentage|undefined|null|NaN|Infinity/);
+    assert.doesNotMatch(message.html, /NaN%|undefined|null|Infinity/);
+  }
+  assert.match(buildMarksEmail({ type: 'new', now: { obtained: 1, total: 3 } }).text, /33.33%/);
 });
 
 test('test email explicitly states it does not change FLEX state', () => {
